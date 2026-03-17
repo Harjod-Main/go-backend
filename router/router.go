@@ -96,16 +96,12 @@ func registerAuthRoutes(r *gin.Engine, firestoreClient *commonfirestore.Client, 
 		cfg.GoogleClient.RevokeTokenURL,
 		httpClient,
 	)
-	memberStorage := authaccess.NewMemberStorage(firestoreClient.Inner())
-	organizationStorage := authaccess.NewOrganizationStorage(firestoreClient.Inner())
 
 	authHandlerCfg := auth.HandlerConfig{
-		GoogleClient:        googleClient,
-		MemberStorage:       memberStorage,
-		OrganizationStorage: organizationStorage,
-		Hash:                hash,
-		Aesgcm:              aesgcm,
-		Token:               token,
+		GoogleClient: googleClient,
+		Hash:         hash,
+		Aesgcm:       aesgcm,
+		Token:        token,
 	}
 	authHandler := auth.NewHandler(authHandlerCfg)
 

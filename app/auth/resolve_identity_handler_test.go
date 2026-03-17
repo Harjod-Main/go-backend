@@ -675,11 +675,9 @@ func TestResolveIdentity(t *testing.T) {
 			}
 
 			h := auth.NewHandler(auth.HandlerConfig{
-				GoogleClient:        m.googleClient,
-				MemberStorage:       m.memberStorage,
-				OrganizationStorage: m.organizationStorage,
-				Hash:                m.hash,
-				Aesgcm:              m.aesgcm,
+				GoogleClient: m.googleClient,
+				Hash:         m.hash,
+				Aesgcm:       m.aesgcm,
 			})
 
 			// Act

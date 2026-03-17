@@ -96,75 +96,76 @@ func (h *handler) ResolveIdentify(c *gin.Context) {
 	}
 
 	hashedEmail := h.hash.HashSha256EncodePepper(validateTokenResp.Response.Email)
+	_ = hashedEmail
 
-	memberInfo, err := h.memberStorage.GetMemberByEmail(ctx, hashedEmail)
-	if err != nil {
-		if err.Error() == "member not found" {
-			// Member not found - this is a new user
-			slog.Info("member not found, returning Google profile data", slog.String("email", validateTokenResp.Response.Email), slog.String("tag", "resolve identify"))
-			wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
-				HTTPStatus: http.StatusOK,
-				Code:       app.CodeSuccess,
-				Message:    app.MessageSuccess,
-				Data: &ResolveIdentityResponse{
-					IsMember:     false,
-					Email:        validateTokenResp.Response.Email,
-					Username:     userProfileResp.Response.Name,
-					ProfileImage: userProfileResp.Response.Picture,
-				},
-			})
-			return
-		}
+	// memberInfo, err := h.memberStorage.GetMemberByEmail(ctx, hashedEmail)
+	// if err != nil {
+	// 	if err.Error() == "member not found" {
+	// 		// Member not found - this is a new user
+	// 		slog.Info("member not found, returning Google profile data", slog.String("email", validateTokenResp.Response.Email), slog.String("tag", "resolve identify"))
+	// 		wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
+	// 			HTTPStatus: http.StatusOK,
+	// 			Code:       app.CodeSuccess,
+	// 			Message:    app.MessageSuccess,
+	// 			Data: &ResolveIdentityResponse{
+	// 				IsMember:     false,
+	// 				Email:        validateTokenResp.Response.Email,
+	// 				Username:     userProfileResp.Response.Name,
+	// 				ProfileImage: userProfileResp.Response.Picture,
+	// 			},
+	// 		})
+	// 		return
+	// 	}
 
-		// Other errors - return internal error
-		slog.Error("fail to get member by email", slog.String("err", err.Error()), slog.String("tag", "resolve identify"))
-		wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
-			HTTPStatus: http.StatusInternalServerError,
-			Code:       app.CodeInternalError,
-			Message:    app.MessageInternalError,
-			Err:        err,
-		})
-		return
-	}
+	// 	// Other errors - return internal error
+	// 	slog.Error("fail to get member by email", slog.String("err", err.Error()), slog.String("tag", "resolve identify"))
+	// 	wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
+	// 		HTTPStatus: http.StatusInternalServerError,
+	// 		Code:       app.CodeInternalError,
+	// 		Message:    app.MessageInternalError,
+	// 		Err:        err,
+	// 	})
+	// 	return
+	// }
 
-	// Member exists - get organization info
-	organizationMember, err := h.organizationStorage.GetMemberOrganization(ctx, memberInfo.GetID())
-	if err != nil {
-		slog.Error("fail to get organization member", slog.String("err", err.Error()), slog.String("tag", "resolve identify"))
-		wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
-			HTTPStatus: http.StatusInternalServerError,
-			Code:       app.CodeInternalError,
-			Message:    app.MessageInternalError,
-			Err:        err,
-		})
-		return
-	}
+	// // Member exists - get organization info
+	// organizationMember, err := h.organizationStorage.GetMemberOrganization(ctx, memberInfo.GetID())
+	// if err != nil {
+	// 	slog.Error("fail to get organization member", slog.String("err", err.Error()), slog.String("tag", "resolve identify"))
+	// 	wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
+	// 		HTTPStatus: http.StatusInternalServerError,
+	// 		Code:       app.CodeInternalError,
+	// 		Message:    app.MessageInternalError,
+	// 		Err:        err,
+	// 	})
+	// 	return
+	// }
 
-	email, err := h.aesgcm.Decrypt(memberInfo.EncryptedEmail)
-	if err != nil {
-		wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
-			HTTPStatus: http.StatusInternalServerError,
-			Code:       app.CodeInternalError,
-			Message:    app.MessageInternalError,
-			Err:        err,
-		})
-		return
-	}
+	// email, err := h.aesgcm.Decrypt(memberInfo.EncryptedEmail)
+	// if err != nil {
+	// 	wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
+	// 		HTTPStatus: http.StatusInternalServerError,
+	// 		Code:       app.CodeInternalError,
+	// 		Message:    app.MessageInternalError,
+	// 		Err:        err,
+	// 	})
+	// 	return
+	// }
 
 	wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
 		Message:    app.MessageSuccess,
 		Data: &ResolveIdentityResponse{
-			IsMember:       true,
-			MemberID:       memberInfo.GetID(),
-			Username:       memberInfo.Username,
-			Email:          email,
-			HashedEmail:    memberInfo.HashedEmail,
-			Status:         memberInfo.Status,
-			OrganizationID: organizationMember.GetOrganizationID(),
-			Role:           organizationMember.Role,
-			ProfileImage:   userProfileResp.Response.Picture,
+			IsMember: true,
+			// MemberID:       memberInfo.GetID(),
+			// Username:       memberInfo.Username,
+			// Email:          email,
+			// HashedEmail:    memberInfo.HashedEmail,
+			// Status:         memberInfo.Status,
+			// OrganizationID: organizationMember.GetOrganizationID(),
+			// Role:           organizationMember.Role,
+			ProfileImage: userProfileResp.Response.Picture,
 		},
 	})
 }
