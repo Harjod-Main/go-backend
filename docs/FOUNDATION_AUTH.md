@@ -24,18 +24,31 @@ Branch: `feature/foundation-supabase-auth`
 ## Local setup
 
 1. Copy `.env.template` → `.env`
-2. Fill:
+2. Fill (required for auth):
    - `SUPABASE_PROJECT_URL`
    - `SECRET_SUPABASE_JWT_SECRET`
-   - `DATABASE_URL` (or DB host/user/password)
-3. Run:
+3. Optional until places/quotes APIs:
+   - `DATABASE_URL` (Supabase **pooler** URI; prefer IPv4 host `*.pooler.supabase.com`)
+4. Run with Docker (team default — Windows / macOS / Linux):
 
 ```bash
-export ENV=LOCAL
-# load .env however you prefer (direnv / manually)
+# Start Docker Desktop first, then:
+make up          # build + run in background
+make logs        # follow logs
+make down        # stop
+
+# Or foreground:
 make run
-# or: go run .
 ```
+
+API: `http://localhost:8080/liveness`
+
+- `Dockerfile` — Harjod-adapted (used by Compose)
+- `Dockerfile.upstream` — original forked template (kept untouched)
+
+Optional host run (no Docker): `make run-local`
+
+Auth boots without a live Postgres connection. Postgres is wired when business routes are added.
 
 ## Verify auth
 
@@ -50,7 +63,8 @@ Expected: `userId`, `email`, `role` from JWT claims.
 
 ## Next
 
-- `places` read API
+- Frontend: Supabase Auth session + Bearer to Go `/auth/me`
+- `places` read API (requires Postgres)
 - `quotes` pricing API
 - Line custom login
 - Frontend: stop calling Supabase tables directly; send Bearer token to Go

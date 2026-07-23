@@ -126,11 +126,7 @@ func validateFoundation(cfg Config) error {
 	if cfg.Supabase.JWTSecret == "" {
 		return fmt.Errorf("SECRET_SUPABASE_JWT_SECRET is required")
 	}
-	if cfg.Postgres.DatabaseURL == "" {
-		if cfg.Postgres.Host == "" || cfg.Postgres.User == "" || cfg.Postgres.Password == "" {
-			return fmt.Errorf("set DATABASE_URL or DB_HOST + SECRET_DB_USER + SECRET_DB_PASSWORD")
-		}
-	}
+	// Postgres is required only when business APIs need it. Auth JWT verify is DB-free.
 	return nil
 }
 

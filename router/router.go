@@ -36,7 +36,8 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		middleware.AccessLog(),
 	)
 
-	db := newPostgresPool(cfg)
+	// Postgres pool is deferred until places/quotes routes are registered.
+	// Auth JWT verification does not touch the database.
 
 	verifier, err := supabaseauth.NewVerifier(
 		cfg.Supabase.JWTSecret,
@@ -50,9 +51,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	authHandler := auth.NewHandler(auth.HandlerConfig{})
 	registerAuthRoutes(r, authHandler, verifier)
 
-	return r, func() {
-		db.Close()
-	}
+	return r, func() {}
 }
 
 func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supabaseauth.Verifier) {

@@ -93,14 +93,12 @@ diff: ## check if there are any uncommitted changes
 .PHONY: docker
 docker: ## build the docker image
 	@echo "Building the docker image"
-	# build and replace the image
 	docker build --rm -t api --build-arg GIT_COMMIT=${GIT_COMMIT} .
 
 .PHONY: run
 run: ## run the docker container
 	@echo "Running the container"
-	# run the container
-	docker run --env-file ./.env --network host -p 8080:8080 api
+	docker run --env-file ./.env -p 8080:8080 api
 
 .PHONY: swagger
 swagger: ## generate swagger file

@@ -1,6 +1,10 @@
 package supabaseauth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -89,4 +93,39 @@ func TestVerifier_RejectsWrongIssuer(t *testing.T) {
 
 	_, err = verifier.Verify(token)
 	r.ErrorContains(err, "issuer")
+}
+
+func TestVerifier_AcceptsAudAsArray(t *testing.T) {
+	r := require.New(t)
+	secret := "secret"
+	projectURL := "https://abc.supabase.co"
+	verifier, err := NewVerifier(secret, projectURL, "authenticated")
+	r.NoError(err)
+
+	now := time.Now().Unix()
+	headerJSON, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
+	payload := map[string]any{
+		"sub":   "u1",
+		"iss":   projectURL + "/auth/v1",
+		"aud":   []string{"authenticated"},
+		"exp":   now + 3600,
+		"iat":   now,
+		"role":  "authenticated",
+		"email": "a@b.c",
+	}
+	payloadJSON, err := json.Marshal(payload)
+	r.NoError(err)
+
+	encodedHeader := base64.RawURLEncoding.EncodeToString(headerJSON)
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	signingInput := encodedHeader + "." + encodedPayload
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(signingInput))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	token := signingInput + "." + sig
+
+	claims, err := verifier.Verify(token)
+	r.NoError(err)
+	r.Equal(FlexibleString("authenticated"), claims.Aud)
+	r.Equal("a@b.c", claims.Email)
 }

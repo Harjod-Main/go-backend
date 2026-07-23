@@ -13,13 +13,42 @@ import (
 
 // Claims are the subset of Supabase Auth JWT claims we care about.
 type Claims struct {
-	Sub   string `json:"sub"`
-	Iss   string `json:"iss"`
-	Aud   string `json:"aud"`
-	Exp   int64  `json:"exp"`
-	Iat   int64  `json:"iat"`
-	Role  string `json:"role"`
-	Email string `json:"email"`
+	Sub   string         `json:"sub"`
+	Iss   string         `json:"iss"`
+	Aud   FlexibleString `json:"aud"`
+	Exp   int64          `json:"exp"`
+	Iat   int64          `json:"iat"`
+	Role  string         `json:"role"`
+	Email string         `json:"email"`
+}
+
+// FlexibleString accepts either a JSON string or a single-element string array
+// (Supabase may emit aud as either form).
+type FlexibleString string
+
+func (s *FlexibleString) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*s = ""
+		return nil
+	}
+	if data[0] == '"' {
+		var v string
+		if err := json.Unmarshal(data, &v); err != nil {
+			return err
+		}
+		*s = FlexibleString(v)
+		return nil
+	}
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return fmt.Errorf("aud: %w", err)
+	}
+	if len(arr) == 0 {
+		*s = ""
+		return nil
+	}
+	*s = FlexibleString(arr[0])
+	return nil
 }
 
 // Verifier validates Supabase access tokens (HS256 + project JWT secret).
@@ -117,7 +146,7 @@ func (v *Verifier) validateClaims(claims *Claims) error {
 	if claims.Iss != v.issuer {
 		return fmt.Errorf("invalid issuer: got %q want %q", claims.Iss, v.issuer)
 	}
-	if claims.Aud != "" && claims.Aud != v.audience {
+	if claims.Aud != "" && string(claims.Aud) != v.audience {
 		return fmt.Errorf("invalid audience: got %q want %q", claims.Aud, v.audience)
 	}
 	if claims.Sub == "" {

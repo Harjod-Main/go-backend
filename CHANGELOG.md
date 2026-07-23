@@ -9,14 +9,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Added
 
-- Harjod foundation: Supabase Postgres config (`DATABASE_URL` / `DB_*` + SSL)
-- Supabase Auth JWT verification (`app/auth/supabaseauth`, HS256)
-- Protected endpoint `GET /api/v1/auth/me`
+- Harjod foundation: Supabase Auth JWT verify (`GET /api/v1/auth/me`)
+- Postgres config optional until places/quotes; auth boots without DB ping
+- Docker Compose API service as team default (`make up` / `make run`)
+- `Dockerfile.upstream` keeps the original forked Dockerfile untouched
 - Docs: `docs/FOUNDATION_AUTH.md`
 
 ### Changed
 
 - Default auth path is Supabase JWT verify (legacy Google resolve / issue-token no longer registered)
+- `Dockerfile` adapted for Harjod/GitHub modules; original saved as `Dockerfile.upstream`
+- `make run` / `make up` use Docker Compose (Windows/macOS friendly, no `--network host`)
 
 ### Fixed
 
