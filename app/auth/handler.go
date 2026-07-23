@@ -15,7 +15,8 @@ type HandlerConfig struct {
 	Token        token.JWTSigner
 }
 
-type handler struct {
+// Handler serves auth HTTP endpoints.
+type Handler struct {
 	pg           access.PostgresRepoer
 	googleClient access.GoogleClienter
 	hash         hash.HashManager
@@ -23,8 +24,8 @@ type handler struct {
 	token        token.JWTSigner
 }
 
-func NewHandler(cfg HandlerConfig) *handler {
-	return &handler{
+func NewHandler(cfg HandlerConfig) *Handler {
+	return &Handler{
 		pg:           cfg.Pg,
 		googleClient: cfg.GoogleClient,
 		hash:         cfg.Hash,

@@ -26,7 +26,7 @@ type ResolveIdentityResponse struct {
 	ProfileImage string           `json:"profileImage,omitempty"`
 }
 
-func (h *handler) ResolveIdentify(c *gin.Context) {
+func (h *Handler) ResolveIdentify(c *gin.Context) {
 
 	ctx := c.Request.Context()
 

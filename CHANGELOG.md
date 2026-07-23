@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Harjod foundation: Supabase Postgres config (`DATABASE_URL` / `DB_*` + SSL)
+- Supabase Auth JWT verification (`app/auth/supabaseauth`, HS256)
+- Protected endpoint `GET /api/v1/auth/me`
+- Docs: `docs/FOUNDATION_AUTH.md`
+
+### Changed
+
+- Default auth path is Supabase JWT verify (legacy Google resolve / issue-token no longer registered)
+
 ### Fixed
 
 - AccessControl typo fixing

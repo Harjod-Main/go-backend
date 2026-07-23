@@ -10,38 +10,18 @@ import (
 	env "github.com/caarlos0/env/v11"
 )
 
-// Config is a struct that contains all configuration for the application
-// NOTE: struct name should be in lowercase and field name should be in uppercase
-// you can group the configuration by adding new struct
-// Example:
-//
-//	type Config struct {
-//			...
-//			GCP gcp  // no need to add tag `env` for struct here.
-//	}
-//
-// then create gcp struct with tag `env` for each field
-//
-//	type gcp struct {
-//		ProjectID string `env:"GCP_PROJECT_ID"`
-//	}
-//
-// you can add field without grouping them by adding new field with tag `env`
-// Example:
-//
-//	type Config struct {
-//		...
-//		AppName string `env:"APP_NAME"`
-//	}
+// Config holds application configuration loaded from environment variables.
 type Config struct {
 	Server        Server
 	AccessControl AccessControl
 	Postgres      Postgres
 	Header        Header
-	JWT           JWT
-	GoogleClient  GoogleClient
-	Aesgcm        Aesgcm
-	Hash          Hash
+	Supabase      Supabase
+	// Legacy custom-auth fields (optional). Kept for gradual migration.
+	JWT          JWT
+	GoogleClient GoogleClient
+	Aesgcm       Aesgcm
+	Hash         Hash
 }
 
 type Server struct {
@@ -57,33 +37,47 @@ type Header struct {
 	RefIDHeaderKey string `env:"REF_ID_HEADER_KEY,notEmpty"`
 }
 
+// Supabase holds settings for Auth JWT verification and project metadata.
+type Supabase struct {
+	// ProjectURL example: https://xxxx.supabase.co
+	ProjectURL string `env:"SUPABASE_PROJECT_URL,notEmpty"`
+	// JWTSecret is the project JWT secret (HS256) from Supabase settings.
+	JWTSecret string `env:"SECRET_SUPABASE_JWT_SECRET,notEmpty"`
+	// Audience defaults to "authenticated" for user access tokens.
+	Audience string `env:"SUPABASE_JWT_AUDIENCE" envDefault:"authenticated"`
+}
+
 type JWT struct {
-	Issuer      string        `env:"JWT_ISSUER,notEmpty"`
-	Audience    string        `env:"JWT_AUDIENCE,notEmpty"`
-	ExpDuration time.Duration `env:"JWT_EXP_DURATION,notEmpty"`
-	PrivateKey  string        `env:"SECRET_JWT_PRIVATE_KEY,notEmpty"`
+	Issuer      string        `env:"JWT_ISSUER"`
+	Audience    string        `env:"JWT_AUDIENCE"`
+	ExpDuration time.Duration `env:"JWT_EXP_DURATION"`
+	PrivateKey  string        `env:"SECRET_JWT_PRIVATE_KEY"`
 }
 
 type Postgres struct {
-	Host     string `env:"DB_HOST,notEmpty"`
-	Port     string `env:"DB_PORT,notEmpty"`
-	Name     string `env:"DB_NAME,notEmpty"`
-	User     string `env:"SECRET_DB_USER,notEmpty"`
-	Password string `env:"SECRET_DB_PASSWORD,notEmpty"`
+	// DatabaseURL optional full URL (preferred for Supabase).
+	// Example: postgres://postgres:pwd@db.xxx.supabase.co:5432/postgres?sslmode=require
+	DatabaseURL string `env:"DATABASE_URL"`
+	Host        string `env:"DB_HOST"`
+	Port        string `env:"DB_PORT" envDefault:"5432"`
+	Name        string `env:"DB_NAME" envDefault:"postgres"`
+	User        string `env:"SECRET_DB_USER"`
+	Password    string `env:"SECRET_DB_PASSWORD"`
+	SSLMode     string `env:"DB_SSLMODE" envDefault:"require"`
 }
 
 type GoogleClient struct {
-	VerifyTokenURL    string `env:"GOOGLE_OAUTH2_VERIFY_TOKEN,notEmpty"`
-	GetUserProfileURL string `env:"GOOGLE_OAUTH2_GET_USER_PROFILE,notEmpty"`
-	RevokeTokenURL    string `env:"GOOGLE_OAUTH2_REVOKE_TOKEN,notEmpty"`
+	VerifyTokenURL    string `env:"GOOGLE_OAUTH2_VERIFY_TOKEN"`
+	GetUserProfileURL string `env:"GOOGLE_OAUTH2_GET_USER_PROFILE"`
+	RevokeTokenURL    string `env:"GOOGLE_OAUTH2_REVOKE_TOKEN"`
 }
 
 type Aesgcm struct {
-	Key string `env:"SECRET_AESGCM_KEY,notEmpty"`
+	Key string `env:"SECRET_AESGCM_KEY"`
 }
 
 type Hash struct {
-	Pepper string `env:"SECRET_HASH_PEPPER,notEmpty"`
+	Pepper string `env:"SECRET_HASH_PEPPER"`
 }
 
 var once sync.Once
@@ -93,7 +87,6 @@ func prefix(e string) string {
 	if e == "" {
 		return ""
 	}
-
 	return fmt.Sprintf("%s_", e)
 }
 
@@ -109,16 +102,40 @@ func C(envPrefix string) Config {
 			log.Fatal(err)
 		}
 
-		base64Coder := codec.NewBase64Coder()
-		rawJWTPrivateKey, err := base64Coder.DecodeBase64(config.JWT.PrivateKey)
-		if err != nil {
+		if err := validateFoundation(config); err != nil {
 			log.Fatal(err)
 		}
-		config.JWT.PrivateKey = rawJWTPrivateKey
 
+		if config.JWT.PrivateKey != "" {
+			base64Coder := codec.NewBase64Coder()
+			rawJWTPrivateKey, err := base64Coder.DecodeBase64(config.JWT.PrivateKey)
+			if err != nil {
+				log.Fatal(err)
+			}
+			config.JWT.PrivateKey = rawJWTPrivateKey
+		}
 	})
 
 	return config
 }
 
-// TODO: read config from xxx.yaml file that contains ${ENV} variable e.g. serviceDLTUrl: ${SERVICE_CORE_DLT_ACCOUNT_URL}
+func validateFoundation(cfg Config) error {
+	if cfg.Supabase.ProjectURL == "" {
+		return fmt.Errorf("SUPABASE_PROJECT_URL is required")
+	}
+	if cfg.Supabase.JWTSecret == "" {
+		return fmt.Errorf("SECRET_SUPABASE_JWT_SECRET is required")
+	}
+	if cfg.Postgres.DatabaseURL == "" {
+		if cfg.Postgres.Host == "" || cfg.Postgres.User == "" || cfg.Postgres.Password == "" {
+			return fmt.Errorf("set DATABASE_URL or DB_HOST + SECRET_DB_USER + SECRET_DB_PASSWORD")
+		}
+	}
+	return nil
+}
+
+// ResetForTest clears the singleton so tests can reload config.
+func ResetForTest() {
+	once = sync.Once{}
+	config = Config{}
+}

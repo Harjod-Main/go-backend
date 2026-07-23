@@ -19,7 +19,7 @@ type IssueTokenResponse struct {
 	AccessToken string `json:"accessToken"`
 }
 
-func (h *handler) IssueToken(c *gin.Context) {
+func (h *Handler) IssueToken(c *gin.Context) {
 	var req IssueTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[IssueTokenResponse]{
