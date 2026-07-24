@@ -1,27 +1,22 @@
 # syntax=docker/dockerfile:1.7
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 
-# ประกาศ arguments
 ARG TARGETOS
 ARG TARGETARCH
 ARG GIT_COMMIT
-ARG GIT_USERNAME
-ARG GIT_PASSWORD
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /src
 
 COPY go.mod go.sum ./
 
-RUN git config --global url."https://${GIT_USERNAME}:${GIT_PASSWORD}@gitdev.devops.krungthai.com/".insteadOf "https://gitdev.devops.krungthai.com/"
-
+# Modules are public (proxy.golang.org). No private Git credentials in the image.
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY . .
 
-# สำคัญ: ใช้ TARGETOS และ TARGETARCH จาก buildx
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -a -installsuffix cgo \

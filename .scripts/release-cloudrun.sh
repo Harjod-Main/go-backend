@@ -23,10 +23,6 @@ export GAR_REPOSITORY="cloud-run-source-deploy"
 # Service Configuration
 export SERVICE_NAME="hm-core-platform-mgmt"
 
-# Git Credentials (for private repo access) - set in ~/.zshrc or ~/.bash_profile
-# export GIT_USERNAME="xxx"
-# export GIT_PASSWORD="xxx"
-
 # Cloud Run Configuration
 export CLOUD_RUN_MEMORY="256Mi"
 export CLOUD_RUN_CPU="1"
@@ -63,17 +59,6 @@ if [[ "$GCP_PROJECT_ID" == "your-gcp-project-id" ]]; then
     exit 1
 fi
 
-if [[ -z "${GIT_USERNAME:-}" ]] || [[ -z "${GIT_PASSWORD:-}" ]]; then
-    print_error "กรุณา set GIT_USERNAME และ GIT_PASSWORD ใน ~/.zshrc หรือ ~/.bash_profile"
-    echo ""
-    echo "เพิ่มบรรทัดนี้ใน ~/.zshrc:"
-    echo '  export GIT_USERNAME="your-username"'
-    echo '  export GIT_PASSWORD="your-token"'
-    echo ""
-    echo "แล้วรัน: source ~/.zshrc"
-    exit 1
-fi
-
 print_info "=== Release to Cloud Run ==="
 print_info "Project: ${GCP_PROJECT_ID}"
 print_info "Region: ${GCP_REGION}"
@@ -86,14 +71,12 @@ print_info "Configuring Docker for Artifact Registry..."
 # gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://${GCP_REGION}-docker.pkg.dev
 
-# Step 2: Build image
+# Step 2: Build image (public Go modules — no GIT_USERNAME/PASSWORD build-args)
 print_info "Building Docker image..."
 docker buildx build \
     --platform linux/amd64 \
     --load \
     --build-arg GIT_COMMIT="${GIT_COMMIT}" \
-    --build-arg GIT_USERNAME="${GIT_USERNAME}" \
-    --build-arg GIT_PASSWORD="${GIT_PASSWORD}" \
     -t "${IMAGE_URI}:${IMAGE_TAG}" \
     .
 

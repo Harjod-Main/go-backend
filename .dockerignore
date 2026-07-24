@@ -1,0 +1,39 @@
+# Secrets — never send to build context
+.env
+.env.*
+!.env.template
+
+# VCS / IDE / tooling
+.git
+.gitignore
+.idea
+.vscode
+.claude
+.local
+.scripts
+
+# Docker itself
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs
+*.md
+docs
+
+# Lint/tool configs not needed at build time
+.golangci.yaml
+.golangci.bck.yaml
+.mockery.yaml
+
+# CI config
+gitlabci.yml
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out

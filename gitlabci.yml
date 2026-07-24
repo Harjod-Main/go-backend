@@ -23,7 +23,7 @@ variables:
   GOPROXY: https://artifact.devops.krungthai.com/repository/goproxy
   GONOSUMDB: gitdev.inno.ktb/*,gitdev.devops.krungthai.com/*
   GOCACHE: ${CI_PROJECT_DIR}/.go/cache
-  GO_VERSION: 1.17.3
+  GO_VERSION: 1.25.0
   NEW_PIPELINE: "false"
   SKIP_SIT: "false"
 

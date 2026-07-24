@@ -320,7 +320,7 @@ func TestResolveIdentity(t *testing.T) {
 				m.pg.
 					EXPECT().
 					GetUserByEmail(mock.Anything, "hashed_email").
-					Return(access.User{}, errors.New("user not found"))
+					Return(access.User{}, access.ErrUserNotFound)
 			},
 			args: args{
 				req: auth.ResolveIdentityRequest{

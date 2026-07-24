@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -49,8 +50,8 @@ func (r *postgresRepo) GetUserByEmail(ctx context.Context, hashedEmail string) (
 		&user.DeletedAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return User{}, fmt.Errorf("user not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, ErrUserNotFound
 		}
 		return User{}, fmt.Errorf("failed to query user: %w", err)
 	}

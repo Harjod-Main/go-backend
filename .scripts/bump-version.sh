@@ -22,7 +22,7 @@ if ! [[ "$1" =~ $VERSION_REGEX ]]; then
 fi
 
 # write version to VERSION file without newline
-echo $1 > $ROOT_DIR/VERSION
+printf '%s' "$1" > "$ROOT_DIR/VERSION"
 
 # git add $ROOT_DIR/VERSION
 # git commit -m "bump version to $1"

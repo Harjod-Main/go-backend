@@ -2,8 +2,9 @@ package access
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/RinTanth/go-common/httpclient"
 )
@@ -45,8 +46,11 @@ type GoogleTokenInfoResponse struct {
 }
 
 func (c *googleClient) ValidateAccessToken(ctx context.Context, accessToken string) (httpclient.Response[GoogleTokenInfoResponse], error) {
-	url := fmt.Sprintf("%s?access_token=%s", c.tokenInfoURL, accessToken)
-	return httpclient.Get[GoogleTokenInfoResponse](ctx, c.client, url)
+	// Prefer form body over query string so tokens are not logged in URLs
+	// (Google migrated tokeninfo away from query params for the same reason).
+	return postForm[GoogleTokenInfoResponse](ctx, c.client, c.tokenInfoURL, url.Values{
+		"access_token": {accessToken},
+	})
 }
 
 type GoogleUserProfileResponse struct {
@@ -65,6 +69,18 @@ func (c *googleClient) GetUserProfile(ctx context.Context, accessToken string) (
 }
 
 func (c *googleClient) RevokeToken(ctx context.Context, accessToken string) (httpclient.Response[any], error) {
-	url := fmt.Sprintf("%s?token=%s", c.revokeURL, accessToken)
-	return httpclient.Post[any, any](ctx, c.client, url, nil)
+	return postForm[any](ctx, c.client, c.revokeURL, url.Values{
+		"token": {accessToken},
+	})
+}
+
+func postForm[RES any](ctx context.Context, client *http.Client, endpoint string, form url.Values) (httpclient.Response[RES], error) {
+	body := strings.NewReader(form.Encode())
+	return httpclient.PostWithOptions[*strings.Reader, RES](
+		ctx,
+		client,
+		endpoint,
+		body,
+		httpclient.HeaderOption("Content-Type", "application/x-www-form-urlencoded"),
+	)
 }
