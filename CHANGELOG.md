@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Changed
 
+- Supabase Auth verifier now validates **ES256** tokens via project JWKS (`/auth/v1/.well-known/jwks.json`), with HS256 + `SECRET_SUPABASE_JWT_SECRET` as legacy fallback
 - Default auth path is Supabase JWT verify (legacy Google resolve / issue-token no longer registered)
 - `Dockerfile` adapted for Harjod/GitHub modules; original saved as `Dockerfile.upstream`
 - `make run` / `make up` use Docker Compose (Windows/macOS friendly, no `--network host`)

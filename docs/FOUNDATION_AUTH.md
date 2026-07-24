@@ -19,7 +19,9 @@ Branch: `feature/foundation-supabase-auth`
 
 2. **Auth**
    - `GET /api/v1/auth/me` (Bearer Supabase access token required)
-   - Package `app/auth/supabaseauth` verifies HS256 JWT with project JWT secret
+   - Package `app/auth/supabaseauth` verifies access tokens:
+     - **ES256** via project JWKS (`/auth/v1/.well-known/jwks.json`) — current Supabase signing keys
+     - **HS256** fallback with `SECRET_SUPABASE_JWT_SECRET` for legacy tokens
 
 ## Local setup
 
