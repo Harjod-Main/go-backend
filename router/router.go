@@ -5,6 +5,7 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth"
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-backend/config"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/health"
@@ -36,8 +37,11 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		middleware.AccessLog(),
 	)
 
-	// Postgres pool is deferred until places/quotes routes are registered.
-	// Auth JWT verification does not touch the database.
+	pool := newPostgresPool(cfg)
+	placesHandler := places.NewHandler(places.HandlerConfig{
+		Repo: places.NewPostgresRepo(pool),
+	})
+	registerPlacesRoutes(r, placesHandler)
 
 	verifier, err := supabaseauth.NewVerifier(
 		cfg.Supabase.JWTSecret,
@@ -45,19 +49,28 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		cfg.Supabase.Audience,
 	)
 	if err != nil {
+		pool.Close()
 		panic(err)
 	}
 
 	authHandler := auth.NewHandler(auth.HandlerConfig{})
 	registerAuthRoutes(r, authHandler, verifier)
 
-	return r, func() {}
+	return r, pool.Close
 }
 
 func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supabaseauth.Verifier) {
 	authGroup := r.Group("/api/v1/auth")
 	{
 		authGroup.GET("/me", supabaseauth.Middleware(verifier), authHandler.Me)
+	}
+}
+
+func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
+	placesGroup := r.Group("/api/v1/places")
+	{
+		// Public read — map is available to guests (matches Supabase RLS public SELECT).
+		placesGroup.GET("", placesHandler.List)
 	}
 }
 

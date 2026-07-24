@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 
 - Harjod foundation: Supabase Auth JWT verify (`GET /api/v1/auth/me`)
-- Postgres config optional until places/quotes; auth boots without DB ping
+- Places map list API: `GET /api/v1/places` (public read, nested parking/hours/rate)
+- Postgres pool required at boot for places routes
 - Docker Compose API service as team default (`make up` / `make run`)
 - `Dockerfile.upstream` keeps the original forked Dockerfile untouched
 - Docs: `docs/FOUNDATION_AUTH.md`
