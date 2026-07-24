@@ -4,7 +4,6 @@ import (
 	"github.com/RinTanth/go-backend/app/auth/access"
 	"github.com/RinTanth/go-common/aesgcm"
 	"github.com/RinTanth/go-common/hash"
-	"github.com/RinTanth/go-common/token"
 )
 
 type HandlerConfig struct {
@@ -12,7 +11,6 @@ type HandlerConfig struct {
 	GoogleClient access.GoogleClienter
 	Hash         hash.HashManager
 	Aesgcm       aesgcm.Aesgcm
-	Token        token.JWTSigner
 }
 
 // Handler serves auth HTTP endpoints.
@@ -21,7 +19,6 @@ type Handler struct {
 	googleClient access.GoogleClienter
 	hash         hash.HashManager
 	aesgcm       aesgcm.Aesgcm
-	token        token.JWTSigner
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
@@ -30,6 +27,5 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		googleClient: cfg.GoogleClient,
 		hash:         cfg.Hash,
 		aesgcm:       cfg.Aesgcm,
-		token:        cfg.Token,
 	}
 }

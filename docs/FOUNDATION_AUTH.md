@@ -9,7 +9,8 @@ Branch: `feature/foundation-supabase-auth`
 | Database | Supabase Postgres |
 | Auth (Google/Apple) | Supabase Auth → Go verifies JWT |
 | Auth (Line) | Custom later |
-| Custom Go `issue-token` / Google resolve | Not primary path |
+| Custom Go `issue-token` | Removed — Supabase Auth is the only JWT issuer |
+| Legacy Google resolve | Kept in codebase but not registered on router |
 
 ## What this branch adds
 
@@ -19,7 +20,9 @@ Branch: `feature/foundation-supabase-auth`
 
 2. **Auth**
    - `GET /api/v1/auth/me` (Bearer Supabase access token required)
-   - Package `app/auth/supabaseauth` verifies HS256 JWT with project JWT secret
+   - Package `app/auth/supabaseauth` verifies access tokens:
+     - **ES256** via project JWKS (`/auth/v1/.well-known/jwks.json`) — current Supabase signing keys
+     - **HS256** fallback with `SECRET_SUPABASE_JWT_SECRET` for legacy tokens
 
 ## Local setup
 
@@ -63,8 +66,8 @@ Expected: `userId`, `email`, `role` from JWT claims.
 
 ## Next
 
-- Frontend: Supabase Auth session + Bearer to Go `/auth/me`
 - `places` read API (requires Postgres)
 - `quotes` pricing API
 - Line custom login
 - Frontend: stop calling Supabase tables directly; send Bearer token to Go
+- Remove or admin-gate leftover legacy Google resolve if unused

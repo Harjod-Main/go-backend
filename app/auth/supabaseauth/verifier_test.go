@@ -1,10 +1,15 @@
 package supabaseauth
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -34,6 +39,96 @@ func TestVerifier_ValidToken(t *testing.T) {
 	r.NoError(err)
 	r.Equal("11111111-1111-1111-1111-111111111111", claims.Sub)
 	r.Equal("user@example.com", claims.Email)
+}
+
+func TestVerifier_ValidES256ViaJWKS(t *testing.T) {
+	r := require.New(t)
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	r.NoError(err)
+	kid := "test-kid-1"
+	x, y, err := JWKPublicCoordsForTest(&privateKey.PublicKey)
+	r.NoError(err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.Equal("/jwks.json", req.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]string{{
+				"kid": kid,
+				"kty": "EC",
+				"alg": "ES256",
+				"crv": "P-256",
+				"x":   x,
+				"y":   y,
+				"use": "sig",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	projectURL := "https://abc.supabase.co"
+	verifier, err := NewVerifier("unused-hs-secret", projectURL, "authenticated")
+	r.NoError(err)
+	verifier.SetJWKSURLForTest(server.URL + "/jwks.json")
+	verifier.SetHTTPClientForTest(server.Client())
+
+	now := time.Now().Unix()
+	token, err := SignES256ForTest(privateKey, kid, Claims{
+		Sub:   "22222222-2222-2222-2222-222222222222",
+		Iss:   projectURL + "/auth/v1",
+		Aud:   "authenticated",
+		Exp:   now + 3600,
+		Iat:   now,
+		Role:  "authenticated",
+		Email: "es256@example.com",
+	})
+	r.NoError(err)
+
+	claims, err := verifier.Verify(token)
+	r.NoError(err)
+	r.Equal("22222222-2222-2222-2222-222222222222", claims.Sub)
+	r.Equal("es256@example.com", claims.Email)
+}
+
+func TestVerifier_RejectsUnknownKid(t *testing.T) {
+	r := require.New(t)
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	r.NoError(err)
+	x, y, err := JWKPublicCoordsForTest(&privateKey.PublicKey)
+	r.NoError(err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]string{{
+				"kid": "other-kid",
+				"kty": "EC",
+				"alg": "ES256",
+				"crv": "P-256",
+				"x":   x,
+				"y":   y,
+			}},
+		})
+	}))
+	defer server.Close()
+
+	verifier, err := NewVerifier("secret", "https://abc.supabase.co", "authenticated")
+	r.NoError(err)
+	verifier.SetJWKSURLForTest(server.URL)
+	verifier.SetHTTPClientForTest(server.Client())
+
+	now := time.Now().Unix()
+	token, err := SignES256ForTest(privateKey, "missing-kid", Claims{
+		Sub: "u1",
+		Iss: "https://abc.supabase.co/auth/v1",
+		Aud: "authenticated",
+		Exp: now + 3600,
+		Iat: now,
+	})
+	r.NoError(err)
+
+	_, err = verifier.Verify(token)
+	r.ErrorContains(err, "unknown kid")
 }
 
 func TestVerifier_RejectsBadSignature(t *testing.T) {

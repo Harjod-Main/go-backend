@@ -15,14 +15,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `Dockerfile.upstream` keeps the original forked Dockerfile untouched
 - Docs: `docs/FOUNDATION_AUTH.md`
 
+### Removed
+
+- Legacy `IssueToken` handler (`POST /auth/issue-token`) — unsigned minting of JWTs for arbitrary `userId` (Supabase Auth is the sole issuer)
+- Dockerfile `GIT_USERNAME` / `GIT_PASSWORD` build-args (password leaked via layer metadata); Harjod modules are public via `proxy.golang.org`
+
 ### Changed
 
-- Default auth path is Supabase JWT verify (legacy Google resolve / issue-token no longer registered)
+- Supabase Auth verifier now validates **ES256** tokens via project JWKS (`/auth/v1/.well-known/jwks.json`), with HS256 + `SECRET_SUPABASE_JWT_SECRET` as legacy fallback
+- Default auth path is Supabase JWT verify (legacy Google resolve no longer registered)
 - `Dockerfile` adapted for Harjod/GitHub modules; original saved as `Dockerfile.upstream`
 - `make run` / `make up` use Docker Compose (Windows/macOS friendly, no `--network host`)
 
 ### Fixed
 
+- `ListenAndServe` failure now exits with code 1 so orchestrators restart the process (was `return` → exit 0)
+- Google tokeninfo/revoke: send token in `application/x-www-form-urlencoded` body (URL-encoded) instead of raw query string
+- Resolve identity: compare `access.ErrUserNotFound` with `errors.Is` instead of string-matching `err.Error()`
+- `.golangci.yaml`: drop stale `unused` exclude for missing `openapi.go`; point `rowserrcheck` at `jackc/pgx/v5` instead of `jmoiron/sqlx`
+- `gitlabci.yml`: bump `GO_VERSION` from 1.17.3 → 1.25.0 to match `go.mod`
 - AccessControl typo fixing
 - [8317ae4] add NewHTTPClientWithCA in httpclient
 - [c5bddc1] fix warn error in RefIDMiddleware

@@ -49,7 +49,7 @@ linters:
         - G303
     rowserrcheck:
       packages:
-        - github.com/jmoiron/sqlx
+        - github.com/jackc/pgx/v5
   exclusions:
     generated: lax
     presets:
@@ -64,9 +64,6 @@ linters:
       - linters:
           - gocritic
         source: //noinspection
-      - linters:
-          - unused
-        path: openapi.go
       - linters:
           - bodyclose
           - dupl

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -98,7 +99,7 @@ func (h *Handler) ResolveIdentify(c *gin.Context) {
 
 	userInfo, err := h.pg.GetUserByEmail(ctx, hashedEmail)
 	if err != nil {
-		if err.Error() == "user not found" {
+		if errors.Is(err, access.ErrUserNotFound) {
 			slog.Info("user not found, returning Google profile data", slog.String("email", validateTokenResp.Response.Email), slog.String("tag", "resolve identify"))
 			wrapper.Respond(c, wrapper.ResponseOption[ResolveIdentityResponse]{
 				HTTPStatus: http.StatusOK,
