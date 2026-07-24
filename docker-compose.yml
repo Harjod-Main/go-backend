@@ -11,3 +11,19 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: postgres
+
+  api:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+    image: api:latest
+    container_name: go-backend-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    # Prefer Supabase DATABASE_URL from .env; local postgres is optional for template demos.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

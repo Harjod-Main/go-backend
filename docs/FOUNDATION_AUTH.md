@@ -32,16 +32,23 @@ Branch: `feature/foundation-supabase-auth`
    - `SECRET_SUPABASE_JWT_SECRET`
 3. Optional until places/quotes APIs:
    - `DATABASE_URL` (Supabase **pooler** URI; prefer IPv4 host `*.pooler.supabase.com`)
-4. Run with Docker (team default — Windows / macOS / Linux):
+4. Run the API locally:
+
+**Day-to-day coding (fast — no Docker rebuild):** stop the API container if it holds port 8080, then:
 
 ```bash
-# Start Docker Desktop first, then:
-make up          # build + run in background
+docker stop go-backend-api   # if still running
+make run-local               # go run . with .env — restart after code changes
+```
+
+Docker images do **not** auto-reload when you edit Go files. The container runs a baked binary from `docker build`.
+
+**Docker (closer to deploy / share with team):**
+
+```bash
+make up          # rebuild image + restart API in background
 make logs        # follow logs
 make down        # stop
-
-# Or foreground:
-make run
 ```
 
 API: `http://localhost:8080/liveness`
@@ -49,9 +56,7 @@ API: `http://localhost:8080/liveness`
 - `Dockerfile` — Harjod-adapted (used by Compose)
 - `Dockerfile.upstream` — original forked template (kept untouched)
 
-Optional host run (no Docker): `make run-local`
-
-Auth boots without a live Postgres connection. Postgres is wired when business routes are added.
+Postgres for places: use Supabase `DATABASE_URL` in `.env` (pooler). Local Compose `postgres` is optional.
 
 ## Verify auth
 
@@ -66,8 +71,20 @@ Expected: `userId`, `email`, `role` from JWT claims.
 
 ## Next
 
-- `places` read API (requires Postgres)
+- ~~`places` read API (requires Postgres)~~ → `GET /api/v1/places` (public map list)
 - `quotes` pricing API
 - Line custom login
-- Frontend: stop calling Supabase tables directly; send Bearer token to Go
+- Frontend: call `GET /api/v1/places` instead of Supabase `.from('places')`
 - Remove or admin-gate leftover legacy Google resolve if unused
+
+## Places read API
+
+`GET /api/v1/places` — public (no JWT). Returns non-blacklisted places nested like the current frontend PostgREST select (`place_id`, `parking_area`, `hours`, `rate`, `rate_tier`).
+
+Requires `DATABASE_URL` (or discrete `DB_*`) at boot — the server opens a Postgres pool when places routes are registered.
+
+```bash
+curl http://localhost:8080/api/v1/places
+```
+
+Expected: `{ "data": [ { "place_id", "name_th", "name_en", "parking_area": [...] } ], "code", "message" }`.

@@ -95,10 +95,28 @@ docker: ## build the docker image
 	@echo "Building the docker image"
 	docker build --rm -t api --build-arg GIT_COMMIT=${GIT_COMMIT} .
 
+.PHONY: up
+up: ## build and run API (+ optional local postgres) in the background
+	@echo "Starting compose services"
+	docker compose build --build-arg GIT_COMMIT=$(GIT_COMMIT) api
+	docker compose up -d api
+
+.PHONY: down
+down: ## stop compose services
+	docker compose down
+
+.PHONY: logs
+logs: ## follow API container logs
+	docker compose logs -f api
+
 .PHONY: run
-run: ## run the docker container
+run: ## run the docker container in the foreground
 	@echo "Running the container"
-	docker run --env-file ./.env -p 8080:8080 api
+	docker run --rm --env-file ./.env -p 8080:8080 api
+
+.PHONY: run-local
+run-local: ## run the API on the host (no Docker)
+	go run .
 
 .PHONY: swagger
 swagger: ## generate swagger file
