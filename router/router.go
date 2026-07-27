@@ -9,6 +9,7 @@ import (
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-backend/app/reports"
 	"github.com/RinTanth/go-backend/app/reviews"
+	"github.com/RinTanth/go-backend/app/submissions"
 	"github.com/RinTanth/go-backend/config"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/health"
@@ -66,10 +67,14 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	}
 
 	authHandler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: profileRepo})
+	submissionsHandler := submissions.NewHandler(submissions.HandlerConfig{
+		Repo: submissions.NewPostgresRepo(pool),
+	})
 	registerAuthRoutes(r, authHandler, verifier)
 	registerReviewsRoutes(r, reviewsHandler, verifier)
 	registerReportsRoutes(r, reportsHandler, verifier)
 	registerProfileRoutes(r, profileHandler, verifier)
+	registerSubmissionsRoutes(r, submissionsHandler, verifier)
 
 	return r, pool.Close
 }
@@ -117,6 +122,11 @@ func registerProfileRoutes(r *gin.Engine, profileHandler *profile.Handler, verif
 		profileGroup.GET("", profileHandler.Get)
 		profileGroup.PATCH("", profileHandler.Update)
 	}
+}
+
+func registerSubmissionsRoutes(r *gin.Engine, submissionsHandler *submissions.Handler, verifier *supabaseauth.Verifier) {
+	// Static path registered separately so it does not collide with /places/:placeId/*.
+	r.POST("/api/v1/places/submissions", supabaseauth.Middleware(verifier), submissionsHandler.Create)
 }
 
 func allowedHeaders(refIDHeaderKey string) []string {
