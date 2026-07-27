@@ -10,7 +10,7 @@ Branch: `feature/foundation-supabase-auth`
 | Auth (Google/Apple) | Supabase Auth → Go verifies JWT |
 | Auth (Line) | Custom later |
 | Custom Go `issue-token` | Removed — Supabase Auth is the only JWT issuer |
-| Legacy Google resolve | Kept in codebase but not registered on router |
+| Legacy Google resolve | Removed — dead code (nil deps if wired) |
 
 ## What this branch adds
 
@@ -77,7 +77,7 @@ Expected: `userId`, `email`, `role` from JWT claims.
 - ~~`quotes` pricing API~~ → `GET /api/v1/places/:placeId/quote?hours=` + `POST /api/v1/quotes`
 - Line custom login
 - Frontend: call Go places/rate/privileges instead of Supabase table reads
-- Remove or admin-gate leftover legacy Google resolve if unused
+- ~~Remove leftover legacy Google resolve~~ → deleted (`ResolveIdentify` + `app/auth/access`)
 
 ## Places read API
 

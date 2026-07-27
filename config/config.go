@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
-	"time"
 
-	"github.com/RinTanth/go-common/codec"
 	env "github.com/caarlos0/env/v11"
 )
 
@@ -17,11 +15,6 @@ type Config struct {
 	Postgres      Postgres
 	Header        Header
 	Supabase      Supabase
-	// Legacy custom-auth fields (optional). Kept for gradual migration.
-	JWT          JWT
-	GoogleClient GoogleClient
-	Aesgcm       Aesgcm
-	Hash         Hash
 }
 
 type Server struct {
@@ -48,13 +41,6 @@ type Supabase struct {
 	Audience string `env:"SUPABASE_JWT_AUDIENCE" envDefault:"authenticated"`
 }
 
-type JWT struct {
-	Issuer      string        `env:"JWT_ISSUER"`
-	Audience    string        `env:"JWT_AUDIENCE"`
-	ExpDuration time.Duration `env:"JWT_EXP_DURATION"`
-	PrivateKey  string        `env:"SECRET_JWT_PRIVATE_KEY"`
-}
-
 type Postgres struct {
 	// DatabaseURL optional full URL (preferred for Supabase).
 	// Example: postgres://postgres:pwd@db.xxx.supabase.co:5432/postgres?sslmode=require
@@ -65,20 +51,6 @@ type Postgres struct {
 	User        string `env:"SECRET_DB_USER"`
 	Password    string `env:"SECRET_DB_PASSWORD"`
 	SSLMode     string `env:"DB_SSLMODE" envDefault:"require"`
-}
-
-type GoogleClient struct {
-	VerifyTokenURL    string `env:"GOOGLE_OAUTH2_VERIFY_TOKEN"`
-	GetUserProfileURL string `env:"GOOGLE_OAUTH2_GET_USER_PROFILE"`
-	RevokeTokenURL    string `env:"GOOGLE_OAUTH2_REVOKE_TOKEN"`
-}
-
-type Aesgcm struct {
-	Key string `env:"SECRET_AESGCM_KEY"`
-}
-
-type Hash struct {
-	Pepper string `env:"SECRET_HASH_PEPPER"`
 }
 
 var once sync.Once
@@ -105,15 +77,6 @@ func C(envPrefix string) Config {
 
 		if err := validateFoundation(config); err != nil {
 			log.Fatal(err)
-		}
-
-		if config.JWT.PrivateKey != "" {
-			base64Coder := codec.NewBase64Coder()
-			rawJWTPrivateKey, err := base64Coder.DecodeBase64(config.JWT.PrivateKey)
-			if err != nil {
-				log.Fatal(err)
-			}
-			config.JWT.PrivateKey = rawJWTPrivateKey
 		}
 	})
 
