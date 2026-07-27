@@ -6,6 +6,7 @@ import (
 	"github.com/RinTanth/go-backend/app/auth"
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/places"
+	"github.com/RinTanth/go-backend/app/reports"
 	"github.com/RinTanth/go-backend/app/reviews"
 	"github.com/RinTanth/go-backend/config"
 	"github.com/RinTanth/go-common/app"
@@ -47,6 +48,9 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	reviewsHandler := reviews.NewHandler(reviews.HandlerConfig{
 		Repo: reviews.NewPostgresRepo(pool),
 	})
+	reportsHandler := reports.NewHandler(reports.HandlerConfig{
+		Repo: reports.NewPostgresRepo(pool),
+	})
 
 	verifier, err := supabaseauth.NewVerifier(
 		cfg.Supabase.JWTSecret,
@@ -61,6 +65,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	authHandler := auth.NewHandler(auth.HandlerConfig{})
 	registerAuthRoutes(r, authHandler, verifier)
 	registerReviewsRoutes(r, reviewsHandler, verifier)
+	registerReportsRoutes(r, reportsHandler, verifier)
 
 	return r, pool.Close
 }
@@ -93,6 +98,12 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 func registerReviewsRoutes(r *gin.Engine, reviewsHandler *reviews.Handler, verifier *supabaseauth.Verifier) {
 	r.GET("/api/v1/places/:placeId/reviews", reviewsHandler.ListByPlace)
 	r.POST("/api/v1/places/:placeId/reviews", supabaseauth.Middleware(verifier), reviewsHandler.Create)
+}
+
+func registerReportsRoutes(r *gin.Engine, reportsHandler *reports.Handler, verifier *supabaseauth.Verifier) {
+	r.POST("/api/v1/reports", supabaseauth.OptionalMiddleware(verifier), reportsHandler.CreateIssueReport)
+	r.POST("/api/v1/reviews/:reviewId/reports", supabaseauth.Middleware(verifier), reportsHandler.CreateReviewReport)
+	r.POST("/api/v1/places/:placeId/feedback", supabaseauth.OptionalMiddleware(verifier), reportsHandler.CreatePlaceFeedback)
 }
 
 func allowedHeaders(refIDHeaderKey string) []string {
