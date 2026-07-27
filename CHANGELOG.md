@@ -21,11 +21,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Legacy `IssueToken` handler (`POST /auth/issue-token`) — unsigned minting of JWTs for arbitrary `userId` (Supabase Auth is the sole issuer)
 - Legacy Google `ResolveIdentify` handler + `app/auth/access` (never registered; wiring would nil-panic)
 - Legacy config/env for custom JWT mint, Google tokeninfo client, AESGCM, hash pepper
+- Legacy HS256 Supabase JWT verification (`SECRET_SUPABASE_JWT_SECRET`) — ES256 JWKS only
 - Dockerfile `GIT_USERNAME` / `GIT_PASSWORD` build-args (password leaked via layer metadata); Harjod modules are public via `proxy.golang.org`
 
 ### Changed
 
-- Supabase Auth verifier now validates **ES256** tokens via project JWKS (`/auth/v1/.well-known/jwks.json`), with HS256 + `SECRET_SUPABASE_JWT_SECRET` as legacy fallback
+- Supabase Auth verifier validates **ES256 only** via project JWKS (`/auth/v1/.well-known/jwks.json`)
 - Default auth path is Supabase JWT verify only
 - `Dockerfile` adapted for Harjod/GitHub modules; original saved as `Dockerfile.upstream`
 - `make run` / `make up` use Docker Compose (Windows/macOS friendly, no `--network host`)

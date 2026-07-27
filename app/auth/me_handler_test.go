@@ -1,6 +1,9 @@
 package auth_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,13 +20,34 @@ func TestMe_WithValidToken(t *testing.T) {
 	r := require.New(t)
 	gin.SetMode(gin.TestMode)
 
-	secret := "test-secret"
-	projectURL := "https://abc.supabase.co"
-	verifier, err := supabaseauth.NewVerifier(secret, projectURL, "authenticated")
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	r.NoError(err)
+	kid := "me-kid"
+	x, y, err := supabaseauth.JWKPublicCoordsForTest(&privateKey.PublicKey)
 	r.NoError(err)
 
+	jwks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]string{{
+				"kid": kid,
+				"kty": "EC",
+				"alg": "ES256",
+				"crv": "P-256",
+				"x":   x,
+				"y":   y,
+			}},
+		})
+	}))
+	t.Cleanup(jwks.Close)
+
+	projectURL := "https://abc.supabase.co"
+	verifier, err := supabaseauth.NewVerifier(projectURL, "authenticated")
+	r.NoError(err)
+	verifier.SetJWKSURLForTest(jwks.URL)
+	verifier.SetHTTPClientForTest(jwks.Client())
+
 	now := time.Now().Unix()
-	token, err := supabaseauth.SignHS256ForTest(secret, supabaseauth.Claims{
+	token, err := supabaseauth.SignES256ForTest(privateKey, kid, supabaseauth.Claims{
 		Sub:   "11111111-1111-1111-1111-111111111111",
 		Iss:   projectURL + "/auth/v1",
 		Aud:   "authenticated",
@@ -58,7 +82,7 @@ func TestMe_UnauthorizedWithoutToken(t *testing.T) {
 	r := require.New(t)
 	gin.SetMode(gin.TestMode)
 
-	verifier, err := supabaseauth.NewVerifier("secret", "https://abc.supabase.co", "authenticated")
+	verifier, err := supabaseauth.NewVerifier("https://abc.supabase.co", "authenticated")
 	r.NoError(err)
 
 	engine := gin.New()

@@ -15,21 +15,20 @@ Branch: `feature/foundation-supabase-auth`
 ## What this branch adds
 
 1. **Foundation**
-   - Config for `SUPABASE_PROJECT_URL`, `SECRET_SUPABASE_JWT_SECRET`
+   - Config for `SUPABASE_PROJECT_URL`
    - Postgres via `DATABASE_URL` or discrete `DB_*` fields with `sslmode=require`
 
 2. **Auth**
    - `GET /api/v1/auth/me` (Bearer Supabase access token required)
    - Package `app/auth/supabaseauth` verifies access tokens:
-     - **ES256** via project JWKS (`/auth/v1/.well-known/jwks.json`) — current Supabase signing keys
-     - **HS256** fallback with `SECRET_SUPABASE_JWT_SECRET` for legacy tokens
+     - **ES256 only** via project JWKS (`/auth/v1/.well-known/jwks.json`)
+     - Legacy **HS256** shared-secret verification removed (forge risk if secret leaks)
 
 ## Local setup
 
 1. Copy `.env.template` → `.env`
 2. Fill (required for auth):
    - `SUPABASE_PROJECT_URL`
-   - `SECRET_SUPABASE_JWT_SECRET`
 3. CORS (`ACCESS_CONTROL_ALLOW_ORIGIN`):
    - Local template defaults to `*` (Bearer auth, not cookies — acceptable for LOCAL)
    - **PROD refuses `*`** — set the Vercel origin, e.g. `https://frontend-statio-s-projects.vercel.app`

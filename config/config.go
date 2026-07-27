@@ -35,9 +35,6 @@ type Header struct {
 type Supabase struct {
 	// ProjectURL example: https://xxxx.supabase.co
 	ProjectURL string `env:"SUPABASE_PROJECT_URL,notEmpty"`
-	// JWTSecret is the legacy HS256 JWT secret (optional for ES256-only projects,
-	// still used as fallback while migrating off shared-secret tokens).
-	JWTSecret string `env:"SECRET_SUPABASE_JWT_SECRET"`
 	// Audience defaults to "authenticated" for user access tokens.
 	Audience string `env:"SUPABASE_JWT_AUDIENCE" envDefault:"authenticated"`
 }
@@ -88,7 +85,7 @@ func validateFoundation(cfg Config) error {
 	if cfg.Supabase.ProjectURL == "" {
 		return fmt.Errorf("SUPABASE_PROJECT_URL is required")
 	}
-	// SECRET_SUPABASE_JWT_SECRET is optional when using ES256 JWKS verification.
+	// Auth verifies ES256 via project JWKS only (no shared JWT secret).
 	// Postgres is required only when business APIs need it. Auth JWT verify is DB-free.
 
 	origin := strings.TrimSpace(cfg.AccessControl.AllowOrigin)

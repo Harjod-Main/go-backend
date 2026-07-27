@@ -3,7 +3,6 @@ package supabaseauth
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,6 +12,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +20,8 @@ import (
 
 const (
 	defaultJWKSCacheTTL = 10 * time.Minute
+	minJWKSCacheTTL     = 30 * time.Second
+	maxJWKSCacheTTL     = 24 * time.Hour
 	defaultHTTPTimeout  = 5 * time.Second
 )
 
@@ -63,24 +65,27 @@ func (s *FlexibleString) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Verifier validates Supabase access tokens.
-// Prefers ES256 via the project JWKS; falls back to HS256 with the legacy JWT secret.
+// Verifier validates Supabase access tokens via ES256 + project JWKS only.
+// Legacy HS256 (shared JWT secret) is intentionally unsupported — that secret
+// could forge tokens if leaked.
 type Verifier struct {
-	secret   []byte
 	issuer   string
 	audience string
 	jwksURL  string
 	client   *http.Client
-	cacheTTL time.Duration
 
-	mu        sync.RWMutex
-	keysByKid map[string]*ecdsa.PublicKey
-	fetchedAt time.Time
+	mu              sync.RWMutex
+	keysByKid       map[string]*ecdsa.PublicKey
+	fetchedAt       time.Time
+	expiresAt       time.Time
+	refreshAfter    time.Time // proactive refresh threshold (before hard expiry)
+	defaultCacheTTL time.Duration
+
+	refreshMu sync.Mutex // singleflight JWKS fetches
 }
 
-// NewVerifier builds a verifier for the given Supabase project.
-// jwtSecret is used only for legacy HS256 tokens (optional but recommended during migration).
-func NewVerifier(jwtSecret, projectURL, audience string) (*Verifier, error) {
+// NewVerifier builds an ES256 JWKS verifier for the given Supabase project.
+func NewVerifier(projectURL, audience string) (*Verifier, error) {
 	if projectURL == "" {
 		return nil, errors.New("supabase project url is required")
 	}
@@ -90,15 +95,14 @@ func NewVerifier(jwtSecret, projectURL, audience string) (*Verifier, error) {
 
 	base := strings.TrimRight(projectURL, "/")
 	return &Verifier{
-		secret:   []byte(jwtSecret),
 		issuer:   base + "/auth/v1",
 		audience: audience,
 		jwksURL:  base + "/auth/v1/.well-known/jwks.json",
 		client: &http.Client{
 			Timeout: defaultHTTPTimeout,
 		},
-		cacheTTL:  defaultJWKSCacheTTL,
-		keysByKid: make(map[string]*ecdsa.PublicKey),
+		defaultCacheTTL: defaultJWKSCacheTTL,
+		keysByKid:       make(map[string]*ecdsa.PublicKey),
 	}, nil
 }
 
@@ -111,6 +115,13 @@ func (v *Verifier) SetJWKSURLForTest(url string) {
 func (v *Verifier) SetHTTPClientForTest(client *http.Client) {
 	if client != nil {
 		v.client = client
+	}
+}
+
+// SetDefaultJWKSCacheTTLForTest overrides the fallback TTL when Cache-Control is absent (unit tests only).
+func (v *Verifier) SetDefaultJWKSCacheTTLForTest(ttl time.Duration) {
+	if ttl > 0 {
+		v.defaultCacheTTL = ttl
 	}
 }
 
@@ -140,9 +151,7 @@ func (v *Verifier) Verify(token string) (*Claims, error) {
 			return nil, err
 		}
 	case "HS256":
-		if err := v.verifyHS256(parts); err != nil {
-			return nil, err
-		}
+		return nil, errors.New("unsupported alg: HS256 (legacy shared-secret tokens are disabled)")
 	default:
 		return nil, fmt.Errorf("unsupported alg: %s", header.Alg)
 	}
@@ -162,25 +171,6 @@ func (v *Verifier) Verify(token string) (*Claims, error) {
 	}
 
 	return &claims, nil
-}
-
-func (v *Verifier) verifyHS256(parts []string) error {
-	if len(v.secret) == 0 {
-		return errors.New("hs256 token requires jwt secret")
-	}
-
-	mac := hmac.New(sha256.New, v.secret)
-	_, _ = mac.Write([]byte(parts[0] + "." + parts[1]))
-	expected := mac.Sum(nil)
-
-	got, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return fmt.Errorf("decode signature: %w", err)
-	}
-	if !hmac.Equal(expected, got) {
-		return errors.New("invalid signature")
-	}
-	return nil
 }
 
 func (v *Verifier) verifyES256(parts []string, kid string) error {
@@ -211,16 +201,29 @@ func (v *Verifier) verifyES256(parts []string, kid string) error {
 }
 
 func (v *Verifier) publicKey(kid string) (*ecdsa.PublicKey, error) {
+	now := time.Now()
+
 	v.mu.RLock()
 	key, ok := v.keysByKid[kid]
-	fresh := time.Since(v.fetchedAt) < v.cacheTTL
+	hardFresh := !v.expiresAt.IsZero() && now.Before(v.expiresAt)
+	softFresh := !v.refreshAfter.IsZero() && now.Before(v.refreshAfter)
 	v.mu.RUnlock()
-	if ok && fresh {
+
+	// Known kid + fully fresh: serve from cache.
+	if ok && softFresh {
 		return key, nil
 	}
 
-	if err := v.refreshJWKS(); err != nil {
-		// If refresh fails but we still have a cached key, use it.
+	// Known kid + within hard TTL but past proactive refresh: serve stale, refresh in background.
+	if ok && hardFresh {
+		go v.refreshJWKS(false)
+		return key, nil
+	}
+
+	// Unknown kid (possible key rotation) or hard-expired cache: synchronous refresh.
+	force := !ok
+	if err := v.refreshJWKS(force); err != nil {
+		// If refresh fails but we still have a cached key for this kid, use it.
 		if ok && key != nil {
 			return key, nil
 		}
@@ -250,7 +253,22 @@ type jwkKey struct {
 	Use string `json:"use"`
 }
 
-func (v *Verifier) refreshJWKS() error {
+func (v *Verifier) refreshJWKS(force bool) error {
+	v.refreshMu.Lock()
+	defer v.refreshMu.Unlock()
+
+	now := time.Now()
+	v.mu.RLock()
+	stillSoftFresh := !v.refreshAfter.IsZero() && now.Before(v.refreshAfter)
+	stillHardFresh := !v.expiresAt.IsZero() && now.Before(v.expiresAt)
+	v.mu.RUnlock()
+
+	// Another goroutine may have refreshed while we waited for the lock.
+	if !force && stillSoftFresh {
+		return nil
+	}
+	_ = stillHardFresh // hard-fresh soft-stale continues into a fetch below
+
 	req, err := http.NewRequest(http.MethodGet, v.jwksURL, nil)
 	if err != nil {
 		return fmt.Errorf("jwks request: %w", err)
@@ -290,11 +308,84 @@ func (v *Verifier) refreshJWKS() error {
 		next[key.Kid] = pub
 	}
 
+	ttl := clampJWKSCacheTTL(cacheTTLFromHeaders(res.Header, v.defaultCacheTTL))
+	fetchedAt := time.Now()
+	expiresAt := fetchedAt.Add(ttl)
+	refreshAfter := fetchedAt.Add(proactiveRefreshAge(ttl))
+
 	v.mu.Lock()
 	v.keysByKid = next
-	v.fetchedAt = time.Now()
+	v.fetchedAt = fetchedAt
+	v.expiresAt = expiresAt
+	v.refreshAfter = refreshAfter
 	v.mu.Unlock()
 	return nil
+}
+
+func proactiveRefreshAge(ttl time.Duration) time.Duration {
+	// Refresh near the end of the TTL window (80% of TTL), with a floor so short TTLs still work.
+	skew := ttl / 5
+	if skew < 5*time.Second {
+		skew = 5 * time.Second
+	}
+	if skew > time.Minute {
+		skew = time.Minute
+	}
+	age := ttl - skew
+	if age < ttl/2 {
+		age = ttl / 2
+	}
+	if age <= 0 {
+		return ttl / 2
+	}
+	return age
+}
+
+func clampJWKSCacheTTL(ttl time.Duration) time.Duration {
+	if ttl < minJWKSCacheTTL {
+		return minJWKSCacheTTL
+	}
+	if ttl > maxJWKSCacheTTL {
+		return maxJWKSCacheTTL
+	}
+	return ttl
+}
+
+// cacheTTLFromHeaders prefers s-maxage, then max-age. Falls back when absent or no-cache/no-store.
+func cacheTTLFromHeaders(h http.Header, fallback time.Duration) time.Duration {
+	cc := h.Get("Cache-Control")
+	if cc == "" {
+		return fallback
+	}
+
+	var maxAge, sMaxAge int64
+	hasMaxAge, hasSMaxAge := false, false
+	for _, part := range strings.Split(cc, ",") {
+		directive := strings.TrimSpace(strings.ToLower(part))
+		switch {
+		case directive == "no-store" || directive == "no-cache":
+			return minJWKSCacheTTL
+		case strings.HasPrefix(directive, "s-maxage="):
+			if n, err := strconv.ParseInt(strings.TrimPrefix(directive, "s-maxage="), 10, 64); err == nil && n >= 0 {
+				sMaxAge = n
+				hasSMaxAge = true
+			}
+		case strings.HasPrefix(directive, "max-age="):
+			if n, err := strconv.ParseInt(strings.TrimPrefix(directive, "max-age="), 10, 64); err == nil && n >= 0 {
+				maxAge = n
+				hasMaxAge = true
+			}
+		}
+	}
+
+	switch {
+	case hasSMaxAge:
+		return time.Duration(sMaxAge) * time.Second
+	case hasMaxAge:
+		return time.Duration(maxAge) * time.Second
+	default:
+		return fallback
+	}
 }
 
 func ecPublicKeyFromJWK(xB64, yB64 string) (*ecdsa.PublicKey, error) {
@@ -334,24 +425,6 @@ func (v *Verifier) validateClaims(claims *Claims) error {
 		return errors.New("missing subject")
 	}
 	return nil
-}
-
-// SignHS256ForTest builds a legacy HS256 token for unit tests.
-func SignHS256ForTest(secret string, claims Claims) (string, error) {
-	headerJSON, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
-	payloadJSON, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-
-	encodedHeader := base64.RawURLEncoding.EncodeToString(headerJSON)
-	encodedPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
-	signingInput := encodedHeader + "." + encodedPayload
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signingInput))
-	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return signingInput + "." + sig, nil
 }
 
 // SignES256ForTest builds an ES256 token for unit tests.

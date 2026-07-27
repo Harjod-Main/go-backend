@@ -57,7 +57,6 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 
 	verifier, err := supabaseauth.NewVerifier(
-		cfg.Supabase.JWTSecret,
 		cfg.Supabase.ProjectURL,
 		cfg.Supabase.Audience,
 	)
