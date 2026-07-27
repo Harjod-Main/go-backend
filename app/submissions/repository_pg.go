@@ -61,6 +61,7 @@ func (r *postgresRepo) Create(ctx context.Context, s *Submission) error {
 	reserved := jsonOrEmptyArray(s.ParkingReserved)
 	ev := jsonOrEmptyArray(s.ParkingEvCharges)
 
+	// Pass JSON as text (not []byte) — pgx encodes []byte as bytea, which fails ::jsonb.
 	err := r.pool.QueryRow(ctx, insertSQL,
 		s.UserID,
 		s.Name,
@@ -74,12 +75,12 @@ func (r *postgresRepo) Create(ctx context.Context, s *Submission) error {
 		s.LostTicketFee,
 		s.OvernightFee,
 		s.FreeMinutes,
-		openingHours,
-		rateTiers,
+		string(openingHours),
+		string(rateTiers),
 		special,
-		stamps,
-		reserved,
-		ev,
+		string(stamps),
+		string(reserved),
+		string(ev),
 		now,
 	).Scan(&s.SubmissionID, &s.Status, &s.CreatedAt)
 	if err != nil {
