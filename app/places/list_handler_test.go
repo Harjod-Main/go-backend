@@ -15,8 +15,10 @@ import (
 )
 
 type stubRepo struct {
-	places []places.Place
-	err    error
+	places  []places.Place
+	err     error
+	rate    *places.PlaceRateDetail
+	rateErr error
 }
 
 func (s stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
@@ -24,6 +26,13 @@ func (s stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
 		return nil, s.err
 	}
 	return s.places, nil
+}
+
+func (s stubRepo) GetPlaceRate(context.Context, string) (*places.PlaceRateDetail, error) {
+	if s.rateErr != nil {
+		return nil, s.rateErr
+	}
+	return s.rate, nil
 }
 
 func TestList_ReturnsPlaces(t *testing.T) {
@@ -97,3 +106,7 @@ func TestList_RepoError(t *testing.T) {
 	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
 	r.Equal(string(app.CodeInternalError), body.Code)
 }
+
+func floatPtr(v float64) *float64 { return &v }
+
+func strPtr(s string) *string { return &s }

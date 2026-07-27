@@ -3,8 +3,10 @@ package places
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -95,4 +97,60 @@ func (r *postgresRepo) ListMapPlaces(ctx context.Context) ([]Place, error) {
 		return nil, fmt.Errorf("decode map places: %w", err)
 	}
 	return places, nil
+}
+
+const getPlaceRateSQL = `
+SELECT row_to_json(rate_obj)
+FROM (
+	SELECT
+		r.free_minutes,
+		r.daily_max::float8 AS daily_max,
+		r.lost_ticket_fee::float8 AS lost_ticket_fee,
+		r.night_rate::float8 AS night_rate,
+		CASE WHEN r.night_start_time IS NULL THEN NULL ELSE to_char(r.night_start_time, 'HH24:MI:SS') END AS night_start_time,
+		CASE WHEN r.night_end_time IS NULL THEN NULL ELSE to_char(r.night_end_time, 'HH24:MI:SS') END AS night_end_time,
+		r.currency,
+		r.notes,
+		COALESCE((
+			SELECT json_agg(
+				json_build_object(
+					'tier_order', rt.tier_order,
+					'price', rt.price::float8,
+					'unit', rt.unit::text,
+					'from_hour', rt.from_hour::float8,
+					'to_hour', CASE WHEN rt.to_hour IS NULL THEN NULL ELSE rt.to_hour::float8 END
+				)
+				ORDER BY rt.tier_order
+			)
+			FROM rate_tier rt
+			WHERE rt.rate_id = r.rate_id
+		), '[]'::json) AS rate_tier
+	FROM places pl
+	INNER JOIN parking_area pa ON pa.place_id = pl.place_id
+	INNER JOIN rate r ON r.parking_area_id = pa.parking_area_id
+	WHERE pl.place_id = $1::uuid
+		AND COALESCE(pl.is_blacklisted, false) = false
+	ORDER BY pa.parking_area_id
+	LIMIT 1
+) rate_obj
+`
+
+func (r *postgresRepo) GetPlaceRate(ctx context.Context, placeID string) (*PlaceRateDetail, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, getPlaceRateSQL, placeID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get place rate: %w", err)
+	}
+	if raw == nil || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var rate PlaceRateDetail
+	if err := json.Unmarshal(raw, &rate); err != nil {
+		return nil, fmt.Errorf("decode place rate: %w", err)
+	}
+	return &rate, nil
 }

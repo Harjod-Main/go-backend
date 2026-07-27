@@ -72,6 +72,7 @@ Expected: `userId`, `email`, `role` from JWT claims.
 ## Next
 
 - ~~`places` read API (requires Postgres)~~ → `GET /api/v1/places` (public map list)
+- ~~Place rate sheet~~ → `GET /api/v1/places/:placeId/rate`
 - `quotes` pricing API
 - Line custom login
 - Frontend: call `GET /api/v1/places` instead of Supabase `.from('places')`
@@ -88,3 +89,11 @@ curl http://localhost:8080/api/v1/places
 ```
 
 Expected: `{ "data": [ { "place_id", "name_th", "name_en", "parking_area": [...] } ], "code", "message" }`.
+
+## Place rate API
+
+`GET /api/v1/places/:placeId/rate` — public read. Returns the first parking area rate sheet (`free_minutes`, tiers with `from_hour`/`to_hour`, night rate, etc.) or `data: null` when none.
+
+```bash
+curl http://localhost:8080/api/v1/places/<place-uuid>/rate
+```

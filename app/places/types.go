@@ -43,3 +43,24 @@ type RateTier struct {
 	Price     float64 `json:"price"`
 	Unit      string  `json:"unit"`
 }
+
+// PlaceRateDetail is the full rate sheet for a place (compatible with frontend fetchParkingRate).
+type PlaceRateDetail struct {
+	FreeMinutes    *int              `json:"free_minutes"`
+	DailyMax       *float64          `json:"daily_max"`
+	LostTicketFee  *float64          `json:"lost_ticket_fee"`
+	NightRate      *float64          `json:"night_rate"`
+	NightStartTime *string           `json:"night_start_time"`
+	NightEndTime   *string           `json:"night_end_time"`
+	Currency       *string           `json:"currency"`
+	Notes          *string           `json:"notes"`
+	RateTier       []PlaceRateTier   `json:"rate_tier"`
+}
+
+type PlaceRateTier struct {
+	TierOrder int      `json:"tier_order"`
+	Price     float64  `json:"price"`
+	Unit      string   `json:"unit"`
+	FromHour  float64  `json:"from_hour"`
+	ToHour    *float64 `json:"to_hour"`
+}
