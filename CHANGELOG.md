@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Fixed
 
 - `ListenAndServe` failure now exits with code 1 so orchestrators restart the process (was `return` → exit 0)
+- PROD boot refuses `ACCESS_CONTROL_ALLOW_ORIGIN=*` (require explicit frontend origin)
 - `.golangci.yaml`: drop stale `unused` exclude for missing `openapi.go`; point `rowserrcheck` at `jackc/pgx/v5` instead of `jmoiron/sqlx`
 - `gitlabci.yml`: bump `GO_VERSION` from 1.17.3 → 1.25.0 to match `go.mod`
 - AccessControl typo fixing

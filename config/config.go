@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	env "github.com/caarlos0/env/v11"
@@ -89,6 +90,13 @@ func validateFoundation(cfg Config) error {
 	}
 	// SECRET_SUPABASE_JWT_SECRET is optional when using ES256 JWKS verification.
 	// Postgres is required only when business APIs need it. Auth JWT verify is DB-free.
+
+	origin := strings.TrimSpace(cfg.AccessControl.AllowOrigin)
+	if IsProdEnv() {
+		if origin == "" || origin == "*" {
+			return fmt.Errorf("ACCESS_CONTROL_ALLOW_ORIGIN must be an explicit frontend origin in PROD (refusing *)")
+		}
+	}
 	return nil
 }
 

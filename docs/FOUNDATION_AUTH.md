@@ -30,9 +30,12 @@ Branch: `feature/foundation-supabase-auth`
 2. Fill (required for auth):
    - `SUPABASE_PROJECT_URL`
    - `SECRET_SUPABASE_JWT_SECRET`
-3. Optional until places/quotes APIs:
+3. CORS (`ACCESS_CONTROL_ALLOW_ORIGIN`):
+   - Local template defaults to `*` (Bearer auth, not cookies — acceptable for LOCAL)
+   - **PROD refuses `*`** — set the Vercel origin, e.g. `https://frontend-statio-s-projects.vercel.app`
+4. Optional until places/quotes APIs:
    - `DATABASE_URL` (Supabase **pooler** URI; prefer IPv4 host `*.pooler.supabase.com`)
-4. Run the API locally:
+5. Run the API locally:
 
 **Day-to-day coding (fast — no Docker rebuild):** stop the API container if it holds port 8080, then:
 
