@@ -74,7 +74,7 @@ Expected: `userId`, `email`, `role` from JWT claims.
 - ~~`places` read API (requires Postgres)~~ → `GET /api/v1/places` (public map list)
 - ~~Place rate sheet~~ → `GET /api/v1/places/:placeId/rate`
 - ~~Place privileges~~ → `GET /api/v1/places/:placeId/privileges` + `GET /api/v1/privileges/:kind/:id`
-- `quotes` pricing API
+- ~~`quotes` pricing API~~ → `GET /api/v1/places/:placeId/quote?hours=` + `POST /api/v1/quotes`
 - Line custom login
 - Frontend: call Go places/rate/privileges instead of Supabase table reads
 - Remove or admin-gate leftover legacy Google resolve if unused
@@ -108,4 +108,23 @@ curl http://localhost:8080/api/v1/places/<place-uuid>/rate
 ```bash
 curl http://localhost:8080/api/v1/places/<place-uuid>/privileges
 curl http://localhost:8080/api/v1/privileges/stamp/<validation-uuid>
+```
+
+## Quotes pricing API
+
+`GET /api/v1/places/:placeId/quote?hours=3` — public. Calculates stay price from the place rate sheet.
+
+`POST /api/v1/quotes` — public batch:
+
+```json
+{ "hours": 3, "placeIds": ["<uuid>", "<uuid>"] }
+```
+
+Pricing rules: subtract `free_minutes`, round remaining up to whole hours, apply hourly/flat tiers, then cap at `daily_max`. Fully free rates use `free_minutes = -1`.
+
+```bash
+curl "http://localhost:8080/api/v1/places/<place-uuid>/quote?hours=3"
+curl -X POST http://localhost:8080/api/v1/quotes \
+  -H "Content-Type: application/json" \
+  -d '{"hours":3,"placeIds":["<uuid>"]}'
 ```

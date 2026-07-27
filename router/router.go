@@ -73,7 +73,10 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 		placesGroup.GET("", placesHandler.List)
 		placesGroup.GET("/:placeId/rate", placesHandler.GetRate)
 		placesGroup.GET("/:placeId/privileges", placesHandler.GetPrivileges)
+		placesGroup.GET("/:placeId/quote", placesHandler.GetQuote)
 	}
+
+	r.POST("/api/v1/quotes", placesHandler.CreateQuotes)
 
 	privilegesGroup := r.Group("/api/v1/privileges")
 	{
