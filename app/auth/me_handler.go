@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
@@ -10,12 +11,15 @@ import (
 )
 
 type MeResponse struct {
-	UserID string `json:"userId"`
-	Email  string `json:"email,omitempty"`
-	Role   string `json:"role,omitempty"`
+	UserID      string  `json:"userId"`
+	Email       string  `json:"email,omitempty"`
+	Role        string  `json:"role,omitempty"`
+	DisplayName string  `json:"displayName,omitempty"`
+	Username    string  `json:"username,omitempty"`
+	AvatarURL   *string `json:"avatarUrl,omitempty"`
 }
 
-// Me returns the authenticated Supabase user from the verified JWT.
+// Me returns the authenticated Supabase user plus profile fields.
 func (h *Handler) Me(c *gin.Context) {
 	claims, ok := supabaseauth.ClaimsFromGin(c)
 	if !ok {
@@ -27,14 +31,27 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 
+	resp := MeResponse{
+		UserID: claims.Sub,
+		Email:  claims.Email,
+		Role:   claims.Role,
+	}
+
+	if h.profileRepo != nil {
+		p, err := h.profileRepo.Ensure(c.Request.Context(), claims.Sub, claims.Email)
+		if err != nil {
+			slog.Error("ensure profile on /me failed", "user_id", claims.Sub, "error", err)
+		} else if p != nil {
+			resp.DisplayName = p.DisplayName
+			resp.Username = p.Username
+			resp.AvatarURL = p.AvatarURL
+		}
+	}
+
 	wrapper.Respond(c, wrapper.ResponseOption[MeResponse]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
 		Message:    app.MessageSuccess,
-		Data: &MeResponse{
-			UserID: claims.Sub,
-			Email:  claims.Email,
-			Role:   claims.Role,
-		},
+		Data:       &resp,
 	})
 }

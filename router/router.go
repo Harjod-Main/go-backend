@@ -6,6 +6,7 @@ import (
 	"github.com/RinTanth/go-backend/app/auth"
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/places"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-backend/app/reports"
 	"github.com/RinTanth/go-backend/app/reviews"
 	"github.com/RinTanth/go-backend/config"
@@ -51,6 +52,8 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	reportsHandler := reports.NewHandler(reports.HandlerConfig{
 		Repo: reports.NewPostgresRepo(pool),
 	})
+	profileRepo := profile.NewPostgresRepo(pool)
+	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 
 	verifier, err := supabaseauth.NewVerifier(
 		cfg.Supabase.JWTSecret,
@@ -62,10 +65,11 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		panic(err)
 	}
 
-	authHandler := auth.NewHandler(auth.HandlerConfig{})
+	authHandler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: profileRepo})
 	registerAuthRoutes(r, authHandler, verifier)
 	registerReviewsRoutes(r, reviewsHandler, verifier)
 	registerReportsRoutes(r, reportsHandler, verifier)
+	registerProfileRoutes(r, profileHandler, verifier)
 
 	return r, pool.Close
 }
@@ -104,6 +108,15 @@ func registerReportsRoutes(r *gin.Engine, reportsHandler *reports.Handler, verif
 	r.POST("/api/v1/reports", supabaseauth.OptionalMiddleware(verifier), reportsHandler.CreateIssueReport)
 	r.POST("/api/v1/reviews/:reviewId/reports", supabaseauth.Middleware(verifier), reportsHandler.CreateReviewReport)
 	r.POST("/api/v1/places/:placeId/feedback", supabaseauth.OptionalMiddleware(verifier), reportsHandler.CreatePlaceFeedback)
+}
+
+func registerProfileRoutes(r *gin.Engine, profileHandler *profile.Handler, verifier *supabaseauth.Verifier) {
+	profileGroup := r.Group("/api/v1/profile")
+	profileGroup.Use(supabaseauth.Middleware(verifier))
+	{
+		profileGroup.GET("", profileHandler.Get)
+		profileGroup.PATCH("", profileHandler.Update)
+	}
 }
 
 func allowedHeaders(refIDHeaderKey string) []string {
