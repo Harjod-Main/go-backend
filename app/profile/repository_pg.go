@@ -111,14 +111,14 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 	if displayName != nil {
 		trimmed := strings.TrimSpace(*displayName)
 		if trimmed == "" || len(trimmed) > 80 {
-			return nil, fmt.Errorf("invalid display name")
+			return nil, ErrInvalidDisplayName
 		}
 		displayName = &trimmed
 	}
 	if username != nil {
 		trimmed := strings.TrimSpace(*username)
 		if !usernamePattern.MatchString(trimmed) {
-			return nil, fmt.Errorf("invalid username")
+			return nil, ErrInvalidUsername
 		}
 		username = &trimmed
 	}
@@ -128,7 +128,7 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 			clearAvatar = true
 			avatarURL = nil
 		} else if len(trimmed) > 2048 {
-			return nil, fmt.Errorf("invalid avatar url")
+			return nil, ErrInvalidAvatarURL
 		} else {
 			avatarURL = &trimmed
 		}

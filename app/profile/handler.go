@@ -112,7 +112,7 @@ func (h *Handler) Update(c *gin.Context) {
 			})
 			return
 		}
-		if strings.Contains(err.Error(), "invalid") {
+		if IsValidationError(err) {
 			wrapper.Respond(c, wrapper.ResponseOption[Profile]{
 				HTTPStatus: http.StatusBadRequest,
 				Code:       app.CodeBadRequest,

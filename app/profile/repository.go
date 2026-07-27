@@ -5,8 +5,19 @@ import (
 	"errors"
 )
 
-var ErrUsernameTaken = errors.New("username already taken")
-var ErrNotFound = errors.New("profile not found")
+var (
+	ErrUsernameTaken      = errors.New("username already taken")
+	ErrNotFound           = errors.New("profile not found")
+	ErrInvalidDisplayName = errors.New("invalid display name")
+	ErrInvalidUsername    = errors.New("invalid username")
+	ErrInvalidAvatarURL   = errors.New("invalid avatar url")
+)
+
+func IsValidationError(err error) bool {
+	return errors.Is(err, ErrInvalidDisplayName) ||
+		errors.Is(err, ErrInvalidUsername) ||
+		errors.Is(err, ErrInvalidAvatarURL)
+}
 
 type Repository interface {
 	GetByUserID(ctx context.Context, userID string) (*Profile, error)
