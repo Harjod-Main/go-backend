@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -37,8 +38,10 @@ func (h *Handler) Me(c *gin.Context) {
 		Role:   claims.Role,
 	}
 
+	seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+
 	if h.profileRepo != nil {
-		p, err := h.profileRepo.Ensure(c.Request.Context(), claims.Sub, claims.Email)
+		p, err := h.profileRepo.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed)
 		if err != nil {
 			slog.Error("ensure profile on /me failed", "user_id", claims.Sub, "error", err)
 		} else if p != nil {

@@ -85,3 +85,51 @@ func TestCreateQuotes_InvalidPlaceID(t *testing.T) {
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.Equal(int32(0), repo.ratesCalls.Load())
 }
+
+func TestGetQuote_RejectsExcessiveHours(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	placeID := "11111111-1111-1111-1111-111111111111"
+	repo := &stubRepo{rate: &places.PlaceRateDetail{
+		FreeMinutes: intPtr(0),
+		Currency:    sPtr("THB"),
+		RateTier: []places.PlaceRateTier{{
+			TierOrder: 1, FromHour: 0, ToHour: f64Ptr(24), Price: 40, Unit: "hourly",
+		}},
+	}}
+
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.GET("/api/v1/places/:placeId/quote", handler.GetQuote)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places/"+placeID+"/quote?hours=1e9", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
+}
+
+func TestCreateQuotes_RejectsExcessiveHours(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{}
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.POST("/api/v1/quotes", handler.CreateQuotes)
+
+	payload, err := json.Marshal(map[string]any{
+		"hours":    1e9,
+		"placeIds": []string{"11111111-1111-1111-1111-111111111111"},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/quotes", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.Equal(int32(0), repo.ratesCalls.Load())
+}

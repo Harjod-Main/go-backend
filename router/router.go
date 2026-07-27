@@ -22,6 +22,9 @@ import (
 // New constructs a gin.Engine with routes and middleware configured.
 func New(cfg config.Config, version, commit string, timeoutDuration time.Duration) (*gin.Engine, func()) {
 	r := gin.New()
+	if err := applyTrustedProxies(r, cfg); err != nil {
+		panic(err)
+	}
 	r.Use(gin.Recovery())
 
 	if config.IsLocalEnv() {
@@ -89,6 +92,7 @@ func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supa
 func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 	placesGroup := r.Group("/api/v1/places")
 	// Public map reads are unauthenticated — bound per-IP burst traffic.
+	// Per-process limiter; see middleware.IPRateLimit scaling note before adding replicas.
 	placesGroup.Use(localmw.IPRateLimit(60, time.Minute))
 	{
 		// Public read — map is available to guests (matches Supabase RLS public SELECT).

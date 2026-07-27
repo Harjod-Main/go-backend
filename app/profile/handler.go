@@ -36,7 +36,8 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 
-	p, err := h.repo.Ensure(c.Request.Context(), claims.Sub, claims.Email)
+	seed := OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+	p, err := h.repo.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed)
 	if err != nil {
 		slog.Error("get profile failed", "user_id", claims.Sub, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[Profile]{
@@ -87,7 +88,8 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 
 	// Ensure row exists before update.
-	if _, err := h.repo.Ensure(c.Request.Context(), claims.Sub, claims.Email); err != nil {
+	seed := OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+	if _, err := h.repo.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
 		slog.Error("ensure profile before update failed", "user_id", claims.Sub, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[Profile]{
 			HTTPStatus: http.StatusInternalServerError,

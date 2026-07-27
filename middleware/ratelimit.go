@@ -11,8 +11,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// IPRateLimit limits requests per client IP using a fixed window counter.
-// Exceeding the limit returns HTTP 429.
+// IPRateLimit limits requests per client IP using a fixed-window counter in process memory.
+//
+// Scaling note: each replica keeps its own counter, so effective quota is limit×N replicas
+// (e.g. 60/min becomes 60×N behind a load balancer). Fine for single-replica deploys today.
+// When scaling horizontally, replace with a shared store (Redis) or distributed token bucket.
+//
+// Expired entries are evicted lazily during allow() (no background goroutine) so tests and
+// repeated handler construction do not leak goroutines.
 func IPRateLimit(limit int, window time.Duration) gin.HandlerFunc {
 	if limit <= 0 {
 		limit = 60
@@ -47,10 +53,11 @@ func IPRateLimit(limit int, window time.Duration) gin.HandlerFunc {
 }
 
 type ipLimiter struct {
-	mu       sync.Mutex
-	limit    int
-	window   time.Duration
-	visitors map[string]*visitor
+	mu          sync.Mutex
+	limit       int
+	window      time.Duration
+	visitors    map[string]*visitor
+	lastCleanup time.Time
 }
 
 type visitor struct {
@@ -59,13 +66,11 @@ type visitor struct {
 }
 
 func newIPLimiter(limit int, window time.Duration) *ipLimiter {
-	l := &ipLimiter{
+	return &ipLimiter{
 		limit:    limit,
 		window:   window,
 		visitors: make(map[string]*visitor),
 	}
-	go l.cleanupLoop()
-	return l
 }
 
 func (l *ipLimiter) allow(key string) (bool, time.Duration) {
@@ -73,6 +78,11 @@ func (l *ipLimiter) allow(key string) (bool, time.Duration) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if now.Sub(l.lastCleanup) >= l.window {
+		l.evictExpiredLocked(now)
+		l.lastCleanup = now
+	}
 
 	v, ok := l.visitors[key]
 	if !ok || now.Sub(v.windowStart) >= l.window {
@@ -92,18 +102,7 @@ func (l *ipLimiter) allow(key string) (bool, time.Duration) {
 	return true, 0
 }
 
-func (l *ipLimiter) cleanupLoop() {
-	ticker := time.NewTicker(l.window)
-	defer ticker.Stop()
-	for range ticker.C {
-		l.cleanup()
-	}
-}
-
-func (l *ipLimiter) cleanup() {
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (l *ipLimiter) evictExpiredLocked(now time.Time) {
 	for key, v := range l.visitors {
 		if now.Sub(v.windowStart) >= l.window {
 			delete(l.visitors, key)

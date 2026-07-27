@@ -2,6 +2,7 @@ package places
 
 import (
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,13 @@ type quoteRequestBody struct {
 	PlaceIDs []string `json:"placeIds"`
 }
 
+// maxQuoteHours caps stay duration on public quote endpoints (30 days).
+const maxQuoteHours = 720
+
+func isValidQuoteHours(hours float64) bool {
+	return hours >= 0 && hours <= maxQuoteHours && !math.IsNaN(hours) && !math.IsInf(hours, 0)
+}
+
 // GetQuote returns a price quote for one place and stay duration (query: hours).
 func (h *Handler) GetQuote(c *gin.Context) {
 	placeID := strings.TrimSpace(c.Param("placeId"))
@@ -30,7 +38,7 @@ func (h *Handler) GetQuote(c *gin.Context) {
 	}
 
 	hours, err := strconv.ParseFloat(strings.TrimSpace(c.Query("hours")), 64)
-	if err != nil || hours < 0 {
+	if err != nil || !isValidQuoteHours(hours) {
 		wrapper.Respond(c, wrapper.ResponseOption[Quote]{
 			HTTPStatus: http.StatusBadRequest,
 			Code:       app.CodeBadRequest,
@@ -63,7 +71,7 @@ func (h *Handler) GetQuote(c *gin.Context) {
 // Rates are loaded in a single batch query (not N sequential round-trips).
 func (h *Handler) CreateQuotes(c *gin.Context) {
 	var body quoteRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil || body.Hours < 0 || len(body.PlaceIDs) == 0 {
+	if err := c.ShouldBindJSON(&body); err != nil || !isValidQuoteHours(body.Hours) || len(body.PlaceIDs) == 0 {
 		wrapper.Respond(c, wrapper.ResponseOption[[]Quote]{
 			HTTPStatus: http.StatusBadRequest,
 			Code:       app.CodeBadRequest,

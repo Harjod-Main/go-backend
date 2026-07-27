@@ -46,22 +46,28 @@ func (r *postgresRepo) GetByUserID(ctx context.Context, userID string) (*Profile
 
 const ensureProfileSQL = `
 INSERT INTO profiles (user_id, display_name, username, avatar_url, created_at, updated_at)
-VALUES ($1::uuid, $2, $3, NULL, $4, $4)
+VALUES ($1::uuid, $2, $3, $4, $5, $5)
 ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
 RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
 `
 
-func (r *postgresRepo) Ensure(ctx context.Context, userID, email string) (*Profile, error) {
+func (r *postgresRepo) Ensure(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error) {
 	existing, err := r.GetByUserID(ctx, userID)
 	if err == nil {
-		return existing, nil
+		return r.maybeBackfillOAuth(ctx, userID, existing, seed)
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
 
-	base := defaultUsername(email)
-	display := defaultDisplayName(email)
+	display := strings.TrimSpace(seed.DisplayName)
+	if isGenericDisplayName(display) {
+		display = defaultDisplayName(email)
+	}
+	base := defaultUsername(display)
+	if isGenericUsername(base) {
+		base = defaultUsername(email)
+	}
 	now := time.Now()
 
 	for attempt := 0; attempt < 8; attempt++ {
@@ -74,7 +80,7 @@ func (r *postgresRepo) Ensure(ctx context.Context, userID, email string) (*Profi
 		}
 
 		var p Profile
-		err := r.pool.QueryRow(ctx, ensureProfileSQL, userID, display, username, now).Scan(
+		err := r.pool.QueryRow(ctx, ensureProfileSQL, userID, display, username, seed.AvatarURL, now).Scan(
 			&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err == nil {
@@ -83,13 +89,48 @@ func (r *postgresRepo) Ensure(ctx context.Context, userID, email string) (*Profi
 		if isUniqueViolation(err) {
 			// Race: another request created the profile, or username collision.
 			if existing, getErr := r.GetByUserID(ctx, userID); getErr == nil {
-				return existing, nil
+				return r.maybeBackfillOAuth(ctx, userID, existing, seed)
 			}
 			continue
 		}
 		return nil, fmt.Errorf("ensure profile: %w", err)
 	}
 	return nil, fmt.Errorf("ensure profile: could not allocate username")
+}
+
+const backfillOAuthSQL = `
+UPDATE profiles
+SET
+	display_name = COALESCE($2, display_name),
+	avatar_url = COALESCE($3, avatar_url),
+	updated_at = $4
+WHERE user_id = $1::uuid
+RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
+`
+
+func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, existing *Profile, seed OAuthSeed) (*Profile, error) {
+	displayName := strings.TrimSpace(seed.DisplayName)
+	needsDisplay := isGenericDisplayName(existing.DisplayName) && !isGenericDisplayName(displayName)
+	needsAvatar := existing.AvatarURL == nil && seed.AvatarURL != nil
+
+	if !needsDisplay && !needsAvatar {
+		return existing, nil
+	}
+
+	var displayPtr *string
+	if needsDisplay {
+		displayPtr = &displayName
+	}
+
+	now := time.Now()
+	var p Profile
+	err := r.pool.QueryRow(ctx, backfillOAuthSQL, userID, displayPtr, seed.AvatarURL, now).Scan(
+		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return existing, nil
+	}
+	return &p, nil
 }
 
 const updateProfileSQL = `

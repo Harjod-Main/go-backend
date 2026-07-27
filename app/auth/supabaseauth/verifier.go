@@ -27,13 +27,14 @@ const (
 
 // Claims are the subset of Supabase Auth JWT claims we care about.
 type Claims struct {
-	Sub   string         `json:"sub"`
-	Iss   string         `json:"iss"`
-	Aud   FlexibleString `json:"aud"`
-	Exp   int64          `json:"exp"`
-	Iat   int64          `json:"iat"`
-	Role  string         `json:"role"`
-	Email string         `json:"email"`
+	Sub          string         `json:"sub"`
+	Iss          string         `json:"iss"`
+	Aud          FlexibleString `json:"aud"`
+	Exp          int64          `json:"exp"`
+	Iat          int64          `json:"iat"`
+	Role         string         `json:"role"`
+	Email        string         `json:"email"`
+	UserMetadata map[string]any `json:"user_metadata"`
 }
 
 // FlexibleString accepts either a JSON string or a single-element string array

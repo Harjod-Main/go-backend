@@ -21,6 +21,9 @@ type Config struct {
 type Server struct {
 	Hostname string `env:"HOSTNAME"`
 	Port     string `env:"PORT,notEmpty"`
+	// Comma-separated CIDRs/IPs for gin SetTrustedProxies (X-Forwarded-For parsing).
+	// Empty: LOCAL uses loopback; PROD uses private RFC1918/link-local ranges (Render/Fly LB).
+	TrustedProxyCIDRs string `env:"TRUSTED_PROXY_CIDRS"`
 }
 
 type AccessControl struct {
