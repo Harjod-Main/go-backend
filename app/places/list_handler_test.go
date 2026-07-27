@@ -15,10 +15,16 @@ import (
 )
 
 type stubRepo struct {
-	places  []places.Place
-	err     error
-	rate    *places.PlaceRateDetail
-	rateErr error
+	places       []places.Place
+	err          error
+	rate         *places.PlaceRateDetail
+	rateErr      error
+	privileges   *places.PlacePrivileges
+	privilegesErr error
+	validation   *places.Validation
+	reserved     *places.Reserved
+	evCharger    *places.EVCharger
+	detailErr    error
 }
 
 func (s stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
@@ -33,6 +39,34 @@ func (s stubRepo) GetPlaceRate(context.Context, string) (*places.PlaceRateDetail
 		return nil, s.rateErr
 	}
 	return s.rate, nil
+}
+
+func (s stubRepo) GetPlacePrivileges(context.Context, string) (*places.PlacePrivileges, error) {
+	if s.privilegesErr != nil {
+		return nil, s.privilegesErr
+	}
+	return s.privileges, nil
+}
+
+func (s stubRepo) GetValidation(context.Context, string) (*places.Validation, error) {
+	if s.detailErr != nil {
+		return nil, s.detailErr
+	}
+	return s.validation, nil
+}
+
+func (s stubRepo) GetReserved(context.Context, string) (*places.Reserved, error) {
+	if s.detailErr != nil {
+		return nil, s.detailErr
+	}
+	return s.reserved, nil
+}
+
+func (s stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, error) {
+	if s.detailErr != nil {
+		return nil, s.detailErr
+	}
+	return s.evCharger, nil
 }
 
 func TestList_ReturnsPlaces(t *testing.T) {

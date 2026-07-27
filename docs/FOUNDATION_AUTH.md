@@ -73,9 +73,10 @@ Expected: `userId`, `email`, `role` from JWT claims.
 
 - ~~`places` read API (requires Postgres)~~ → `GET /api/v1/places` (public map list)
 - ~~Place rate sheet~~ → `GET /api/v1/places/:placeId/rate`
+- ~~Place privileges~~ → `GET /api/v1/places/:placeId/privileges` + `GET /api/v1/privileges/:kind/:id`
 - `quotes` pricing API
 - Line custom login
-- Frontend: call `GET /api/v1/places` instead of Supabase `.from('places')`
+- Frontend: call Go places/rate/privileges instead of Supabase table reads
 - Remove or admin-gate leftover legacy Google resolve if unused
 
 ## Places read API
@@ -96,4 +97,15 @@ Expected: `{ "data": [ { "place_id", "name_th", "name_en", "parking_area": [...]
 
 ```bash
 curl http://localhost:8080/api/v1/places/<place-uuid>/rate
+```
+
+## Place privileges API
+
+`GET /api/v1/places/:placeId/privileges` — public read. Nested validation / reserved / EV charger rows (PostgREST-compatible).
+
+`GET /api/v1/privileges/:kind/:id` — public read. `kind` is `stamp`, `reserve`, or `ev`.
+
+```bash
+curl http://localhost:8080/api/v1/places/<place-uuid>/privileges
+curl http://localhost:8080/api/v1/privileges/stamp/<validation-uuid>
 ```

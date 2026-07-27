@@ -72,6 +72,12 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 		// Public read — map is available to guests (matches Supabase RLS public SELECT).
 		placesGroup.GET("", placesHandler.List)
 		placesGroup.GET("/:placeId/rate", placesHandler.GetRate)
+		placesGroup.GET("/:placeId/privileges", placesHandler.GetPrivileges)
+	}
+
+	privilegesGroup := r.Group("/api/v1/privileges")
+	{
+		privilegesGroup.GET("/:kind/:id", placesHandler.GetPrivilegeDetail)
 	}
 }
 
