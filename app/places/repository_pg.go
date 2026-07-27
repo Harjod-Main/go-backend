@@ -3,8 +3,10 @@ package places
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -95,4 +97,294 @@ func (r *postgresRepo) ListMapPlaces(ctx context.Context) ([]Place, error) {
 		return nil, fmt.Errorf("decode map places: %w", err)
 	}
 	return places, nil
+}
+
+const getPlaceRateSQL = `
+SELECT row_to_json(rate_obj)
+FROM (
+	SELECT
+		r.free_minutes,
+		r.daily_max::float8 AS daily_max,
+		r.lost_ticket_fee::float8 AS lost_ticket_fee,
+		r.night_rate::float8 AS night_rate,
+		CASE WHEN r.night_start_time IS NULL THEN NULL ELSE to_char(r.night_start_time, 'HH24:MI:SS') END AS night_start_time,
+		CASE WHEN r.night_end_time IS NULL THEN NULL ELSE to_char(r.night_end_time, 'HH24:MI:SS') END AS night_end_time,
+		r.currency,
+		r.notes,
+		COALESCE((
+			SELECT json_agg(
+				json_build_object(
+					'tier_order', rt.tier_order,
+					'price', rt.price::float8,
+					'unit', rt.unit::text,
+					'from_hour', rt.from_hour::float8,
+					'to_hour', CASE WHEN rt.to_hour IS NULL THEN NULL ELSE rt.to_hour::float8 END
+				)
+				ORDER BY rt.tier_order
+			)
+			FROM rate_tier rt
+			WHERE rt.rate_id = r.rate_id
+		), '[]'::json) AS rate_tier
+	FROM places pl
+	INNER JOIN parking_area pa ON pa.place_id = pl.place_id
+	INNER JOIN rate r ON r.parking_area_id = pa.parking_area_id
+	WHERE pl.place_id = $1::uuid
+		AND COALESCE(pl.is_blacklisted, false) = false
+	ORDER BY pa.parking_area_id
+	LIMIT 1
+) rate_obj
+`
+
+func (r *postgresRepo) GetPlaceRate(ctx context.Context, placeID string) (*PlaceRateDetail, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, getPlaceRateSQL, placeID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get place rate: %w", err)
+	}
+	if raw == nil || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var rate PlaceRateDetail
+	if err := json.Unmarshal(raw, &rate); err != nil {
+		return nil, fmt.Errorf("decode place rate: %w", err)
+	}
+	return &rate, nil
+}
+
+const getPlacePrivilegesSQL = `
+SELECT json_build_object(
+	'validation_parking', COALESCE((
+		SELECT json_agg(
+			json_build_object(
+				'validation', json_build_object(
+					'validation_id', v.validation_id::text,
+					'validation_type', v.validation_type::text,
+					'condition_description', COALESCE(v.condition_description, ''),
+					'validation_location', v.validation_location,
+					'notes', v.notes,
+					'program_other', v.program_other,
+					'program', CASE WHEN prog.program_id IS NULL THEN NULL ELSE json_build_object(
+						'name', prog.name,
+						'provider', prog.provider,
+						'category', prog.category::text
+					) END,
+					'validation_tier', COALESCE((
+						SELECT json_agg(
+							json_build_object(
+								'tier_order', vt.tier_order,
+								'min_spend', vt.min_spend::float8,
+								'free_minutes', vt.free_minutes
+							)
+							ORDER BY vt.tier_order
+						)
+						FROM validation_tier vt
+						WHERE vt.validation_id = v.validation_id
+					), '[]'::json)
+				)
+			)
+			ORDER BY v.validation_id
+		)
+		FROM validation_parking vp
+		INNER JOIN validation v ON v.validation_id = vp.validation_id
+		LEFT JOIN program prog ON prog.program_id = v.program_id
+		WHERE vp.place_id = pl.place_id
+	), '[]'::json),
+	'parking_area', COALESCE((
+		SELECT json_agg(area_obj)
+		FROM (
+			SELECT json_build_object(
+				'reserved', COALESCE((
+					SELECT json_agg(
+						json_build_object(
+							'reserved_id', res.reserved_id::text,
+							'reservation_type', res.reservation_type::text,
+							'reservation_type_other', res.reservation_type_other,
+							'program_other', res.program_other,
+							'floor', res.floor,
+							'conditions', res.conditions,
+							'spots_count', res.spots_count,
+							'additional_benefits', res.additional_benefits,
+							'program', CASE WHEN rprog.program_id IS NULL THEN NULL ELSE json_build_object(
+								'name', rprog.name,
+								'provider', rprog.provider,
+								'category', rprog.category::text
+							) END
+						)
+						ORDER BY res.reserved_id
+					)
+					FROM reserved res
+					LEFT JOIN program rprog ON rprog.program_id = res.program_id
+					WHERE res.parking_area_id = pa.parking_area_id
+				), '[]'::json),
+				'ev_charger', COALESCE((
+					SELECT json_agg(
+						json_build_object(
+							'ev_charger_id', ev.ev_charger_id::text,
+							'floor', ev.floor,
+							'ev_provider', CASE WHEN ep.ev_provider_id IS NULL THEN NULL ELSE json_build_object(
+								'name', ep.name
+							) END,
+							'ev_connector', COALESCE((
+								SELECT json_agg(
+									json_build_object(
+										'connector_type', ec.connector_type::text
+									)
+									ORDER BY ec.ev_connector_id
+								)
+								FROM ev_connector ec
+								WHERE ec.ev_charger_id = ev.ev_charger_id
+							), '[]'::json)
+						)
+						ORDER BY ev.ev_charger_id
+					)
+					FROM ev_charger ev
+					LEFT JOIN ev_provider ep ON ep.ev_provider_id = ev.ev_provider_id
+					WHERE ev.parking_area_id = pa.parking_area_id
+				), '[]'::json)
+			) AS area_obj
+			FROM parking_area pa
+			WHERE pa.place_id = pl.place_id
+		) areas
+	), '[]'::json)
+)
+FROM places pl
+WHERE pl.place_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
+`
+
+func (r *postgresRepo) GetPlacePrivileges(ctx context.Context, placeID string) (*PlacePrivileges, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, getPlacePrivilegesSQL, placeID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get place privileges: %w", err)
+	}
+	if raw == nil || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var privileges PlacePrivileges
+	if err := json.Unmarshal(raw, &privileges); err != nil {
+		return nil, fmt.Errorf("decode place privileges: %w", err)
+	}
+	if privileges.ValidationParking == nil {
+		privileges.ValidationParking = []ValidationParking{}
+	}
+	if privileges.ParkingArea == nil {
+		privileges.ParkingArea = []PrivilegeArea{}
+	}
+	return &privileges, nil
+}
+
+const getValidationSQL = `
+SELECT json_build_object(
+	'validation_id', v.validation_id::text,
+	'validation_type', v.validation_type::text,
+	'condition_description', COALESCE(v.condition_description, ''),
+	'validation_location', v.validation_location,
+	'notes', v.notes,
+	'program_other', v.program_other,
+	'program', CASE WHEN prog.program_id IS NULL THEN NULL ELSE json_build_object(
+		'name', prog.name,
+		'provider', prog.provider,
+		'category', prog.category::text
+	) END,
+	'validation_tier', COALESCE((
+		SELECT json_agg(
+			json_build_object(
+				'tier_order', vt.tier_order,
+				'min_spend', vt.min_spend::float8,
+				'free_minutes', vt.free_minutes
+			)
+			ORDER BY vt.tier_order
+		)
+		FROM validation_tier vt
+		WHERE vt.validation_id = v.validation_id
+	), '[]'::json)
+)
+FROM validation v
+LEFT JOIN program prog ON prog.program_id = v.program_id
+WHERE v.validation_id = $1::uuid
+`
+
+func (r *postgresRepo) GetValidation(ctx context.Context, validationID string) (*Validation, error) {
+	return scanJSON[Validation](ctx, r.pool, getValidationSQL, validationID, "validation")
+}
+
+const getReservedSQL = `
+SELECT json_build_object(
+	'reserved_id', res.reserved_id::text,
+	'reservation_type', res.reservation_type::text,
+	'reservation_type_other', res.reservation_type_other,
+	'program_other', res.program_other,
+	'floor', res.floor,
+	'conditions', res.conditions,
+	'spots_count', res.spots_count,
+	'additional_benefits', res.additional_benefits,
+	'program', CASE WHEN prog.program_id IS NULL THEN NULL ELSE json_build_object(
+		'name', prog.name,
+		'provider', prog.provider,
+		'category', prog.category::text
+	) END
+)
+FROM reserved res
+LEFT JOIN program prog ON prog.program_id = res.program_id
+WHERE res.reserved_id = $1::uuid
+`
+
+func (r *postgresRepo) GetReserved(ctx context.Context, reservedID string) (*Reserved, error) {
+	return scanJSON[Reserved](ctx, r.pool, getReservedSQL, reservedID, "reserved")
+}
+
+const getEVChargerSQL = `
+SELECT json_build_object(
+	'ev_charger_id', ev.ev_charger_id::text,
+	'floor', ev.floor,
+	'ev_provider', CASE WHEN ep.ev_provider_id IS NULL THEN NULL ELSE json_build_object(
+		'name', ep.name
+	) END,
+	'ev_connector', COALESCE((
+		SELECT json_agg(
+			json_build_object(
+				'connector_type', ec.connector_type::text
+			)
+			ORDER BY ec.ev_connector_id
+		)
+		FROM ev_connector ec
+		WHERE ec.ev_charger_id = ev.ev_charger_id
+	), '[]'::json)
+)
+FROM ev_charger ev
+LEFT JOIN ev_provider ep ON ep.ev_provider_id = ev.ev_provider_id
+WHERE ev.ev_charger_id = $1::uuid
+`
+
+func (r *postgresRepo) GetEVCharger(ctx context.Context, evChargerID string) (*EVCharger, error) {
+	return scanJSON[EVCharger](ctx, r.pool, getEVChargerSQL, evChargerID, "ev charger")
+}
+
+func scanJSON[T any](ctx context.Context, pool *pgxpool.Pool, sql string, id string, label string) (*T, error) {
+	var raw []byte
+	err := pool.QueryRow(ctx, sql, id).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get %s: %w", label, err)
+	}
+	if raw == nil || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", label, err)
+	}
+	return &value, nil
 }

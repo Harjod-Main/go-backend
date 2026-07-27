@@ -43,3 +43,89 @@ type RateTier struct {
 	Price     float64 `json:"price"`
 	Unit      string  `json:"unit"`
 }
+
+// PlaceRateDetail is the full rate sheet for a place (compatible with frontend fetchParkingRate).
+type PlaceRateDetail struct {
+	FreeMinutes    *int              `json:"free_minutes"`
+	DailyMax       *float64          `json:"daily_max"`
+	LostTicketFee  *float64          `json:"lost_ticket_fee"`
+	NightRate      *float64          `json:"night_rate"`
+	NightStartTime *string           `json:"night_start_time"`
+	NightEndTime   *string           `json:"night_end_time"`
+	Currency       *string           `json:"currency"`
+	Notes          *string           `json:"notes"`
+	RateTier       []PlaceRateTier   `json:"rate_tier"`
+}
+
+type PlaceRateTier struct {
+	TierOrder int      `json:"tier_order"`
+	Price     float64  `json:"price"`
+	Unit      string   `json:"unit"`
+	FromHour  float64  `json:"from_hour"`
+	ToHour    *float64 `json:"to_hour"`
+}
+
+// PlacePrivileges is the nested privilege payload (compatible with frontend privilegeTransform).
+type PlacePrivileges struct {
+	ValidationParking []ValidationParking `json:"validation_parking"`
+	ParkingArea       []PrivilegeArea     `json:"parking_area"`
+}
+
+type ValidationParking struct {
+	Validation *Validation `json:"validation"`
+}
+
+type Validation struct {
+	ValidationID          string           `json:"validation_id"`
+	ValidationType        string           `json:"validation_type"`
+	ConditionDescription  string           `json:"condition_description"`
+	ValidationLocation    *string          `json:"validation_location"`
+	Notes                 *string          `json:"notes"`
+	ProgramOther          *string          `json:"program_other"`
+	Program               *Program         `json:"program"`
+	ValidationTier         []ValidationTier  `json:"validation_tier"`
+}
+
+type ValidationTier struct {
+	TierOrder   int      `json:"tier_order"`
+	MinSpend    float64  `json:"min_spend"`
+	FreeMinutes *int     `json:"free_minutes"`
+}
+
+type Program struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Category string `json:"category"`
+}
+
+type PrivilegeArea struct {
+	Reserved  []Reserved  `json:"reserved"`
+	EVCharger []EVCharger `json:"ev_charger"`
+}
+
+type Reserved struct {
+	ReservedID            string   `json:"reserved_id"`
+	ReservationType       string   `json:"reservation_type"`
+	ReservationTypeOther  *string  `json:"reservation_type_other"`
+	ProgramOther          *string  `json:"program_other"`
+	Floor                 *string  `json:"floor"`
+	Conditions            *string  `json:"conditions"`
+	SpotsCount            *int     `json:"spots_count"`
+	AdditionalBenefits    *string  `json:"additional_benefits"`
+	Program               *Program `json:"program"`
+}
+
+type EVCharger struct {
+	EVChargerID string        `json:"ev_charger_id"`
+	Floor       *string       `json:"floor"`
+	EVProvider  *EVProvider   `json:"ev_provider"`
+	EVConnector []EVConnector `json:"ev_connector"`
+}
+
+type EVProvider struct {
+	Name string `json:"name"`
+}
+
+type EVConnector struct {
+	ConnectorType string `json:"connector_type"`
+}
