@@ -10,8 +10,10 @@ import (
 )
 
 // List returns non-blacklisted places for the map drawer (public read).
+// Responses are served from a short in-memory TTL cache and advertise
+// Cache-Control + ETag so clients can short-circuit with If-None-Match.
 func (h *Handler) List(c *gin.Context) {
-	places, err := h.repo.ListMapPlaces(c.Request.Context())
+	places, etag, err := h.listCache.getOrLoad(c.Request.Context(), h.repo.ListMapPlaces)
 	if err != nil {
 		slog.Error("places list failed", "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[[]Place]{
@@ -19,6 +21,15 @@ func (h *Handler) List(c *gin.Context) {
 			Code:       app.CodeInternalError,
 			Message:    app.MessageInternalError,
 		})
+		return
+	}
+
+	c.Header("Cache-Control", listMapPlacesCacheControl)
+	c.Header("ETag", etag)
+	c.Header("Vary", "Accept-Encoding")
+
+	if etagMatches(c.GetHeader("If-None-Match"), etag) {
+		c.Status(http.StatusNotModified)
 		return
 	}
 

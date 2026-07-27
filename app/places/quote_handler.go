@@ -39,11 +39,18 @@ func (h *Handler) GetQuote(c *gin.Context) {
 		return
 	}
 
-	quote, ok := h.buildQuote(c, placeID, hours)
-	if !ok {
+	rate, err := h.repo.GetPlaceRate(c.Request.Context(), placeID)
+	if err != nil {
+		slog.Error("quote rate lookup failed", "place_id", placeID, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[Quote]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
 		return
 	}
 
+	quote := CalculateQuote(placeID, hours, rate)
 	wrapper.Respond(c, wrapper.ResponseOption[Quote]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
@@ -53,6 +60,7 @@ func (h *Handler) GetQuote(c *gin.Context) {
 }
 
 // CreateQuotes returns price quotes for many places at once.
+// Rates are loaded in a single batch query (not N sequential round-trips).
 func (h *Handler) CreateQuotes(c *gin.Context) {
 	var body quoteRequestBody
 	if err := c.ShouldBindJSON(&body); err != nil || body.Hours < 0 || len(body.PlaceIDs) == 0 {
@@ -72,7 +80,7 @@ func (h *Handler) CreateQuotes(c *gin.Context) {
 		return
 	}
 
-	quotes := make([]Quote, 0, len(body.PlaceIDs))
+	placeIDs := make([]string, 0, len(body.PlaceIDs))
 	for _, placeID := range body.PlaceIDs {
 		placeID = strings.TrimSpace(placeID)
 		if _, err := uuid.Parse(placeID); err != nil {
@@ -83,12 +91,23 @@ func (h *Handler) CreateQuotes(c *gin.Context) {
 			})
 			return
 		}
+		placeIDs = append(placeIDs, placeID)
+	}
 
-		quote, ok := h.buildQuote(c, placeID, body.Hours)
-		if !ok {
-			return
-		}
-		quotes = append(quotes, quote)
+	rates, err := h.repo.GetPlaceRates(c.Request.Context(), placeIDs)
+	if err != nil {
+		slog.Error("batch quote rate lookup failed", "count", len(placeIDs), "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[[]Quote]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+
+	quotes := make([]Quote, 0, len(placeIDs))
+	for _, placeID := range placeIDs {
+		quotes = append(quotes, CalculateQuote(placeID, body.Hours, rates[placeID]))
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[[]Quote]{
@@ -97,19 +116,4 @@ func (h *Handler) CreateQuotes(c *gin.Context) {
 		Message:    app.MessageSuccess,
 		Data:       &quotes,
 	})
-}
-
-func (h *Handler) buildQuote(c *gin.Context, placeID string, hours float64) (Quote, bool) {
-	rate, err := h.repo.GetPlaceRate(c.Request.Context(), placeID)
-	if err != nil {
-		slog.Error("quote rate lookup failed", "place_id", placeID, "error", err)
-		wrapper.Respond(c, wrapper.ResponseOption[Quote]{
-			HTTPStatus: http.StatusInternalServerError,
-			Code:       app.CodeInternalError,
-			Message:    app.MessageInternalError,
-		})
-		return Quote{}, false
-	}
-
-	return CalculateQuote(placeID, hours, rate), true
 }

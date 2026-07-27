@@ -6,9 +6,13 @@ type HandlerConfig struct {
 
 // Handler serves places HTTP endpoints.
 type Handler struct {
-	repo Repository
+	repo      Repository
+	listCache *listMapCache
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
-	return &Handler{repo: cfg.Repo}
+	return &Handler{
+		repo:      cfg.Repo,
+		listCache: newListMapCache(listMapPlacesCacheTTL),
+	}
 }

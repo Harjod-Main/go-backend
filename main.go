@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -32,7 +31,11 @@ var version string
 
 func main() {
 	cfg := config.C(config.Env)
-	_ = logger.New(logger.GCPKeyReplacer)
+	log := logger.New(logger.GCPKeyReplacer)
+	if log == nil {
+		fmt.Fprintln(os.Stderr, "failed to initialize logger")
+		os.Exit(1)
+	}
 
 	r, stop := router.New(cfg, version, commit, handlerTimeout)
 	defer stop()
@@ -42,13 +45,13 @@ func main() {
 	go shutdown.Graceful(srv, gracefulShutdownDuration)
 
 	fmt.Printf("\n🚀 Server running on Port:%s\n\n", cfg.Server.Port)
-	slog.Info("run", "port", cfg.Server.Port)
+	log.Info("run", "port", cfg.Server.Port)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		slog.Error("HTTP server ListenAndServe", "error", err)
+		log.Error("HTTP server ListenAndServe", "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("bye")
+	log.Info("bye")
 }
 
 func newServer(cfg config.Config, handler http.Handler) *http.Server {

@@ -31,7 +31,7 @@ func TestGetRate_ReturnsRate(t *testing.T) {
 	}
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{rate: detail}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{rate: detail}})
 	engine.GET("/api/v1/places/:placeId/rate", handler.GetRate)
 
 	placeID := "11111111-1111-1111-1111-111111111111"
@@ -56,7 +56,7 @@ func TestGetRate_NotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{rate: nil}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{rate: nil}})
 	engine.GET("/api/v1/places/:placeId/rate", handler.GetRate)
 
 	placeID := "22222222-2222-2222-2222-222222222222"
@@ -78,7 +78,7 @@ func TestGetRate_InvalidPlaceID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{}})
 	engine.GET("/api/v1/places/:placeId/rate", handler.GetRate)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/places/not-a-uuid/rate", nil)
@@ -100,7 +100,7 @@ func TestGetRate_RepoError(t *testing.T) {
 
 	engine := gin.New()
 	handler := places.NewHandler(places.HandlerConfig{
-		Repo: stubRepo{rateErr: errors.New("db down")},
+		Repo: &stubRepo{rateErr: errors.New("db down")},
 	})
 	engine.GET("/api/v1/places/:placeId/rate", handler.GetRate)
 

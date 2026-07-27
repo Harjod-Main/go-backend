@@ -34,7 +34,7 @@ func TestGetPrivileges_ReturnsPayload(t *testing.T) {
 	}
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{privileges: payload}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{privileges: payload}})
 	engine.GET("/api/v1/places/:placeId/privileges", handler.GetPrivileges)
 
 	placeID := "11111111-1111-1111-1111-111111111111"
@@ -58,7 +58,7 @@ func TestGetPrivileges_EmptyWhenMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{privileges: nil}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{privileges: nil}})
 	engine.GET("/api/v1/places/:placeId/privileges", handler.GetPrivileges)
 
 	placeID := "11111111-1111-1111-1111-111111111111"
@@ -86,7 +86,7 @@ func TestGetPrivilegeDetail_Stamp(t *testing.T) {
 	}
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{validation: validation}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{validation: validation}})
 	engine.GET("/api/v1/privileges/:kind/:id", handler.GetPrivilegeDetail)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privileges/stamp/"+validation.ValidationID, nil)
@@ -107,7 +107,7 @@ func TestGetPrivilegeDetail_NotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{}})
 	engine.GET("/api/v1/privileges/:kind/:id", handler.GetPrivilegeDetail)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privileges/stamp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", nil)
@@ -128,7 +128,7 @@ func TestGetPrivilegeDetail_InvalidKind(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{}})
 	engine.GET("/api/v1/privileges/:kind/:id", handler.GetPrivilegeDetail)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privileges/other/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", nil)

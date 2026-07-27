@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/RinTanth/go-backend/app/places"
@@ -15,66 +16,92 @@ import (
 )
 
 type stubRepo struct {
-	places       []places.Place
-	err          error
-	rate         *places.PlaceRateDetail
-	rateErr      error
-	privileges   *places.PlacePrivileges
-	privilegesErr error
-	validation   *places.Validation
-	reserved     *places.Reserved
-	evCharger    *places.EVCharger
-	detailErr    error
+	places         []places.Place
+	err            error
+	listCalls      atomic.Int32
+	rate           *places.PlaceRateDetail
+	rates          map[string]*places.PlaceRateDetail
+	rateErr        error
+	ratesCalls     atomic.Int32
+	privileges     *places.PlacePrivileges
+	privilegesErr  error
+	validation     *places.Validation
+	reserved       *places.Reserved
+	evCharger      *places.EVCharger
+	detailErr      error
 }
 
-func (s stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
+func (s *stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
+	s.listCalls.Add(1)
 	if s.err != nil {
 		return nil, s.err
 	}
 	return s.places, nil
 }
 
-func (s stubRepo) GetPlaceRate(context.Context, string) (*places.PlaceRateDetail, error) {
+func (s *stubRepo) GetPlaceRate(_ context.Context, placeID string) (*places.PlaceRateDetail, error) {
 	if s.rateErr != nil {
 		return nil, s.rateErr
+	}
+	if s.rates != nil {
+		return s.rates[placeID], nil
 	}
 	return s.rate, nil
 }
 
-func (s stubRepo) GetPlacePrivileges(context.Context, string) (*places.PlacePrivileges, error) {
+func (s *stubRepo) GetPlaceRates(_ context.Context, placeIDs []string) (map[string]*places.PlaceRateDetail, error) {
+	s.ratesCalls.Add(1)
+	if s.rateErr != nil {
+		return nil, s.rateErr
+	}
+	out := make(map[string]*places.PlaceRateDetail, len(placeIDs))
+	if s.rates != nil {
+		for _, id := range placeIDs {
+			if rate, ok := s.rates[id]; ok {
+				out[id] = rate
+			}
+		}
+		return out, nil
+	}
+	if s.rate != nil {
+		for _, id := range placeIDs {
+			out[id] = s.rate
+		}
+	}
+	return out, nil
+}
+
+func (s *stubRepo) GetPlacePrivileges(context.Context, string) (*places.PlacePrivileges, error) {
 	if s.privilegesErr != nil {
 		return nil, s.privilegesErr
 	}
 	return s.privileges, nil
 }
 
-func (s stubRepo) GetValidation(context.Context, string) (*places.Validation, error) {
+func (s *stubRepo) GetValidation(context.Context, string) (*places.Validation, error) {
 	if s.detailErr != nil {
 		return nil, s.detailErr
 	}
 	return s.validation, nil
 }
 
-func (s stubRepo) GetReserved(context.Context, string) (*places.Reserved, error) {
+func (s *stubRepo) GetReserved(context.Context, string) (*places.Reserved, error) {
 	if s.detailErr != nil {
 		return nil, s.detailErr
 	}
 	return s.reserved, nil
 }
 
-func (s stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, error) {
+func (s *stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, error) {
 	if s.detailErr != nil {
 		return nil, s.detailErr
 	}
 	return s.evCharger, nil
 }
 
-func TestList_ReturnsPlaces(t *testing.T) {
-	r := require.New(t)
-	gin.SetMode(gin.TestMode)
-
+func samplePlaces() []places.Place {
 	freeMinutes := 30
-	sample := []places.Place{{
+	return []places.Place{{
 		PlaceID:   "11111111-1111-1111-1111-111111111111",
 		NameTh:    "สยามพารากอน",
 		NameEn:    "Siam Paragon",
@@ -92,9 +119,16 @@ func TestList_ReturnsPlaces(t *testing.T) {
 			}},
 		}},
 	}}
+}
 
+func TestList_ReturnsPlaces(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	sample := samplePlaces()
+	repo := &stubRepo{places: sample}
 	engine := gin.New()
-	handler := places.NewHandler(places.HandlerConfig{Repo: stubRepo{places: sample}})
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
 	engine.GET("/api/v1/places", handler.List)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/places", nil)
@@ -102,6 +136,8 @@ func TestList_ReturnsPlaces(t *testing.T) {
 	engine.ServeHTTP(w, req)
 
 	r.Equal(http.StatusOK, w.Code)
+	r.Equal("public, max-age=30", w.Header().Get("Cache-Control"))
+	r.NotEmpty(w.Header().Get("ETag"))
 
 	var body struct {
 		Code    string         `json:"code"`
@@ -118,13 +154,59 @@ func TestList_ReturnsPlaces(t *testing.T) {
 	r.Equal(40.0, body.Data[0].ParkingArea[0].Rate[0].RateTier[0].Price)
 }
 
+func TestList_UsesShortTTLCache(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{places: samplePlaces()}
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.GET("/api/v1/places", handler.List)
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/places", nil)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		r.Equal(http.StatusOK, w.Code)
+	}
+
+	r.Equal(int32(1), repo.listCalls.Load())
+}
+
+func TestList_NotModifiedWhenETagMatches(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{places: samplePlaces()}
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.GET("/api/v1/places", handler.List)
+
+	first := httptest.NewRecorder()
+	engine.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/v1/places", nil))
+	r.Equal(http.StatusOK, first.Code)
+	etag := first.Header().Get("ETag")
+	r.NotEmpty(etag)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places", nil)
+	req.Header.Set("If-None-Match", etag)
+	second := httptest.NewRecorder()
+	engine.ServeHTTP(second, req)
+
+	r.Equal(http.StatusNotModified, second.Code)
+	r.Equal(etag, second.Header().Get("ETag"))
+	r.Equal("public, max-age=30", second.Header().Get("Cache-Control"))
+	r.Empty(second.Body.String())
+	r.Equal(int32(1), repo.listCalls.Load())
+}
+
 func TestList_RepoError(t *testing.T) {
 	r := require.New(t)
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
 	handler := places.NewHandler(places.HandlerConfig{
-		Repo: stubRepo{err: errors.New("db down")},
+		Repo: &stubRepo{err: errors.New("db down")},
 	})
 	engine.GET("/api/v1/places", handler.List)
 

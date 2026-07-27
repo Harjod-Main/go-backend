@@ -11,6 +11,7 @@ import (
 	"github.com/RinTanth/go-backend/app/reviews"
 	"github.com/RinTanth/go-backend/app/submissions"
 	"github.com/RinTanth/go-backend/config"
+	localmw "github.com/RinTanth/go-backend/middleware"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/health"
 	"github.com/RinTanth/go-common/middleware"
@@ -87,6 +88,8 @@ func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supa
 
 func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 	placesGroup := r.Group("/api/v1/places")
+	// Public map reads are unauthenticated — bound per-IP burst traffic.
+	placesGroup.Use(localmw.IPRateLimit(60, time.Minute))
 	{
 		// Public read — map is available to guests (matches Supabase RLS public SELECT).
 		placesGroup.GET("", placesHandler.List)
@@ -98,6 +101,7 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 	r.POST("/api/v1/quotes", placesHandler.CreateQuotes)
 
 	privilegesGroup := r.Group("/api/v1/privileges")
+	privilegesGroup.Use(localmw.IPRateLimit(60, time.Minute))
 	{
 		privilegesGroup.GET("/:kind/:id", placesHandler.GetPrivilegeDetail)
 	}
@@ -138,6 +142,7 @@ func allowedHeaders(refIDHeaderKey string) []string {
 		"accept",
 		"origin",
 		"Cache-Control",
+		"If-None-Match",
 		"X-Requested-With",
 		refIDHeaderKey,
 	}

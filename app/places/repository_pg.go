@@ -155,6 +155,87 @@ func (r *postgresRepo) GetPlaceRate(ctx context.Context, placeID string) (*Place
 	return &rate, nil
 }
 
+const getPlaceRatesSQL = `
+SELECT
+	picked.place_id::text,
+	json_build_object(
+		'free_minutes', picked.free_minutes,
+		'daily_max', picked.daily_max,
+		'lost_ticket_fee', picked.lost_ticket_fee,
+		'night_rate', picked.night_rate,
+		'night_start_time', picked.night_start_time,
+		'night_end_time', picked.night_end_time,
+		'currency', picked.currency,
+		'notes', picked.notes,
+		'rate_tier', COALESCE((
+			SELECT json_agg(
+				json_build_object(
+					'tier_order', rt.tier_order,
+					'price', rt.price::float8,
+					'unit', rt.unit::text,
+					'from_hour', rt.from_hour::float8,
+					'to_hour', CASE WHEN rt.to_hour IS NULL THEN NULL ELSE rt.to_hour::float8 END
+				)
+				ORDER BY rt.tier_order
+			)
+			FROM rate_tier rt
+			WHERE rt.rate_id = picked.rate_id
+		), '[]'::json)
+	)
+FROM (
+	SELECT DISTINCT ON (pl.place_id)
+		pl.place_id,
+		r.rate_id,
+		r.free_minutes,
+		r.daily_max::float8 AS daily_max,
+		r.lost_ticket_fee::float8 AS lost_ticket_fee,
+		r.night_rate::float8 AS night_rate,
+		CASE WHEN r.night_start_time IS NULL THEN NULL ELSE to_char(r.night_start_time, 'HH24:MI:SS') END AS night_start_time,
+		CASE WHEN r.night_end_time IS NULL THEN NULL ELSE to_char(r.night_end_time, 'HH24:MI:SS') END AS night_end_time,
+		r.currency,
+		r.notes
+	FROM places pl
+	INNER JOIN parking_area pa ON pa.place_id = pl.place_id
+	INNER JOIN rate r ON r.parking_area_id = pa.parking_area_id
+	WHERE pl.place_id = ANY($1::uuid[])
+		AND COALESCE(pl.is_blacklisted, false) = false
+	ORDER BY pl.place_id, pa.parking_area_id
+) picked
+`
+
+func (r *postgresRepo) GetPlaceRates(ctx context.Context, placeIDs []string) (map[string]*PlaceRateDetail, error) {
+	out := make(map[string]*PlaceRateDetail, len(placeIDs))
+	if len(placeIDs) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.pool.Query(ctx, getPlaceRatesSQL, placeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get place rates: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var placeID string
+		var raw []byte
+		if err := rows.Scan(&placeID, &raw); err != nil {
+			return nil, fmt.Errorf("scan place rates: %w", err)
+		}
+		if raw == nil || string(raw) == "null" {
+			continue
+		}
+		var rate PlaceRateDetail
+		if err := json.Unmarshal(raw, &rate); err != nil {
+			return nil, fmt.Errorf("decode place rate %s: %w", placeID, err)
+		}
+		out[placeID] = &rate
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate place rates: %w", err)
+	}
+	return out, nil
+}
+
 const getPlacePrivilegesSQL = `
 SELECT json_build_object(
 	'validation_parking', COALESCE((
