@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"path"
 	"time"
@@ -13,18 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func newPostgresPool(cfg config.Config) *pgxpool.Pool {
+func newPostgresPool(cfg config.Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	dsn, err := postgresDSN(cfg.Postgres)
 	if err != nil {
-		log.Panic("invalid postgres config: ", err)
+		return nil, fmt.Errorf("invalid postgres config: %w", err)
 	}
 
 	poolConfig, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		log.Panic("invalid postgres dsn: ", err)
+		return nil, fmt.Errorf("invalid postgres dsn: %w", err)
 	}
 
 	// Supabase transaction pooler (PgBouncer) rejects prepared statements.
@@ -32,13 +31,13 @@ func newPostgresPool(cfg config.Config) *pgxpool.Pool {
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
-		log.Panic("failed to create postgres pool: ", err)
+		return nil, fmt.Errorf("failed to create postgres pool: %w", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		log.Panic("failed to ping postgres: ", err)
+		return nil, fmt.Errorf("failed to ping postgres: %w", err)
 	}
-	return pool
+	return pool, nil
 }
 
 func postgresDSN(cfg config.Postgres) (string, error) {

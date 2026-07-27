@@ -37,7 +37,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	r, stop := router.New(cfg, version, commit, handlerTimeout)
+	r, stop, err := router.New(cfg, version, commit, handlerTimeout)
+	if err != nil {
+		log.Error("router initialization failed", "error", err)
+		os.Exit(1)
+	}
 	defer stop()
 
 	srv := newServer(cfg, r)

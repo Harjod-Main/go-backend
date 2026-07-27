@@ -7,11 +7,11 @@ import (
 
 // QuoteBreakdown describes one priced segment in a quote.
 type QuoteBreakdown struct {
-	FromHour float64 `json:"fromHour"`
-	ToHour   float64 `json:"toHour"`
-	Unit     string  `json:"unit"`
-	Price    float64 `json:"price"`
-	Amount   float64 `json:"amount"`
+	FromHour     float64 `json:"fromHour"`
+	ToHour       float64 `json:"toHour"`
+	Unit         string  `json:"unit"`
+	PriceSatang  int64   `json:"priceSatang"`
+	AmountSatang int64   `json:"amountSatang"`
 }
 
 // Quote is the calculated parking price for a stay duration.
@@ -21,9 +21,9 @@ type Quote struct {
 	Currency           string           `json:"currency"`
 	FreeMinutesApplied int              `json:"freeMinutesApplied"`
 	ChargeableHours    float64          `json:"chargeableHours"`
-	Subtotal           float64          `json:"subtotal"`
+	SubtotalSatang     int64            `json:"subtotalSatang"`
 	DailyMaxApplied    bool             `json:"dailyMaxApplied"`
-	Total              float64          `json:"total"`
+	TotalSatang        int64            `json:"totalSatang"`
 	Breakdown          []QuoteBreakdown `json:"breakdown"`
 }
 
@@ -81,7 +81,7 @@ func CalculateQuote(placeID string, hours float64, rate *PlaceRateDetail) Quote 
 	})
 
 	flatApplied := map[int]bool{}
-	var subtotal float64
+	var subtotalSatang int64
 
 	for h := 0; h < int(chargeableHours); h++ {
 		hourStart := float64(h)
@@ -97,34 +97,40 @@ func CalculateQuote(placeID string, hours float64, rate *PlaceRateDetail) Quote 
 				continue
 			}
 			flatApplied[tier.TierOrder] = true
-			subtotal += tier.Price
+			priceSatang := satangFromFloat(tier.Price)
+			subtotalSatang += priceSatang
 			quote.Breakdown = append(quote.Breakdown, QuoteBreakdown{
-				FromHour: tier.FromHour,
-				ToHour:   tierEndOr(tier, hourEnd),
-				Unit:     "flat",
-				Price:    tier.Price,
-				Amount:   tier.Price,
+				FromHour:     tier.FromHour,
+				ToHour:       tierEndOr(tier, hourEnd),
+				Unit:         "flat",
+				PriceSatang:  priceSatang,
+				AmountSatang: priceSatang,
 			})
 		default: // hourly
-			subtotal += tier.Price
+			priceSatang := satangFromFloat(tier.Price)
+			subtotalSatang += priceSatang
 			quote.Breakdown = append(quote.Breakdown, QuoteBreakdown{
-				FromHour: hourStart,
-				ToHour:   hourEnd,
-				Unit:     "hourly",
-				Price:    tier.Price,
-				Amount:   tier.Price,
+				FromHour:     hourStart,
+				ToHour:       hourEnd,
+				Unit:         "hourly",
+				PriceSatang:  priceSatang,
+				AmountSatang: priceSatang,
 			})
 		}
 	}
 
-	quote.Subtotal = subtotal
-	quote.Total = subtotal
-	if rate.DailyMax != nil && *rate.DailyMax > 0 && subtotal > *rate.DailyMax {
-		quote.Total = *rate.DailyMax
+	quote.SubtotalSatang = subtotalSatang
+	quote.TotalSatang = subtotalSatang
+	if rate.DailyMax != nil && *rate.DailyMax > 0 && subtotalSatang > satangFromFloat(*rate.DailyMax) {
+		quote.TotalSatang = satangFromFloat(*rate.DailyMax)
 		quote.DailyMaxApplied = true
 	}
 
 	return quote
+}
+
+func satangFromFloat(v float64) int64 {
+	return int64(math.Round(v * 100))
 }
 
 func findTierForHour(tiers []PlaceRateTier, hour float64) *PlaceRateTier {

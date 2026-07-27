@@ -21,9 +21,12 @@ type Config struct {
 type Server struct {
 	Hostname string `env:"HOSTNAME"`
 	Port     string `env:"PORT,notEmpty"`
-	// Comma-separated CIDRs/IPs for gin SetTrustedProxies (X-Forwarded-For parsing).
-	// Empty: LOCAL uses loopback; PROD uses private RFC1918/link-local ranges (Render/Fly LB).
+	// Comma-separated CIDRs/IPs for gin SetTrustedProxies (X-Forwarded-For / rate-limit ClientIP).
+	// Required when ENV=PROD (unless EnableDebugClientIP). Empty LOCAL uses loopback only.
 	TrustedProxyCIDRs string `env:"TRUSTED_PROXY_CIDRS"`
+	// Temporary: expose GET /debug/client-ip to discover LB RemoteAddr for TRUSTED_PROXY_CIDRS.
+	// Turn off after configuring proxies — do not leave enabled in production long-term.
+	EnableDebugClientIP bool `env:"ENABLE_DEBUG_CLIENT_IP" envDefault:"false"`
 }
 
 type AccessControl struct {
@@ -95,6 +98,9 @@ func validateFoundation(cfg Config) error {
 	if IsProdEnv() {
 		if origin == "" || origin == "*" {
 			return fmt.Errorf("ACCESS_CONTROL_ALLOW_ORIGIN must be an explicit frontend origin in PROD (refusing *)")
+		}
+		if strings.TrimSpace(cfg.Server.TrustedProxyCIDRs) == "" && !cfg.Server.EnableDebugClientIP {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS is required in PROD (set your load balancer ingress CIDR, not broad RFC1918); set ENABLE_DEBUG_CLIENT_IP=true temporarily to discover RemoteAddr via GET /debug/client-ip")
 		}
 	}
 	return nil

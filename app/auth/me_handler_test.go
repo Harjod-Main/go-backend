@@ -1,20 +1,46 @@
 package auth_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/RinTanth/go-backend/app/auth"
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type stubProfileRepo struct {
+	getProfile  *profile.Profile
+	getErr      error
+	getCalls    atomic.Int32
+	ensureCalls atomic.Int32
+	updateCalls atomic.Int32
+}
+
+func (s *stubProfileRepo) GetByUserID(context.Context, string) (*profile.Profile, error) {
+	s.getCalls.Add(1)
+	return s.getProfile, s.getErr
+}
+
+func (s *stubProfileRepo) Ensure(context.Context, string, string, profile.OAuthSeed) (*profile.Profile, error) {
+	s.ensureCalls.Add(1)
+	return nil, nil
+}
+
+func (s *stubProfileRepo) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
+	s.updateCalls.Add(1)
+	return nil, nil
+}
 
 func TestMe_WithValidToken(t *testing.T) {
 	r := require.New(t)
@@ -94,4 +120,39 @@ func TestMe_UnauthorizedWithoutToken(t *testing.T) {
 	engine.ServeHTTP(w, req)
 
 	r.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func TestMe_DoesNotCreateMissingProfile(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubProfileRepo{getErr: profile.ErrNotFound}
+	handler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: repo})
+
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub:   "11111111-1111-1111-1111-111111111111",
+			Email: "user@example.com",
+			Role:  "authenticated",
+		})
+		c.Next()
+	})
+	engine.GET("/api/v1/auth/me", handler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal(int32(1), repo.getCalls.Load())
+	r.Equal(int32(0), repo.ensureCalls.Load())
+
+	var body struct {
+		Data auth.MeResponse `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal("11111111-1111-1111-1111-111111111111", body.Data.UserID)
+	r.Equal("user@example.com", body.Data.Email)
+	r.Empty(body.Data.Username)
 }

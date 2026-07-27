@@ -1,6 +1,7 @@
 package router
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/RinTanth/go-backend/app/auth"
@@ -20,10 +21,10 @@ import (
 )
 
 // New constructs a gin.Engine with routes and middleware configured.
-func New(cfg config.Config, version, commit string, timeoutDuration time.Duration) (*gin.Engine, func()) {
+func New(cfg config.Config, version, commit string, timeoutDuration time.Duration) (*gin.Engine, func(), error) {
 	r := gin.New()
 	if err := applyTrustedProxies(r, cfg); err != nil {
-		panic(err)
+		return nil, nil, fmt.Errorf("apply trusted proxies: %w", err)
 	}
 	r.Use(gin.Recovery())
 
@@ -34,6 +35,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	r.GET("/liveness", health.Liveness(version, commit))
 	r.GET("/metrics", health.Metrics())
 	r.GET("/readiness", health.Readiness())
+	registerDebugRoutes(r, cfg)
 
 	r.Use(
 		middleware.SecurityHeaders(),
@@ -45,7 +47,10 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		middleware.AccessLog(),
 	)
 
-	pool := newPostgresPool(cfg)
+	pool, err := newPostgresPool(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
 	placesHandler := places.NewHandler(places.HandlerConfig{
 		Repo: places.NewPostgresRepo(pool),
 	})
@@ -66,7 +71,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	)
 	if err != nil {
 		pool.Close()
-		panic(err)
+		return nil, nil, fmt.Errorf("create supabase verifier: %w", err)
 	}
 
 	authHandler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: profileRepo})
@@ -79,7 +84,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	registerProfileRoutes(r, profileHandler, verifier)
 	registerSubmissionsRoutes(r, submissionsHandler, verifier)
 
-	return r, pool.Close
+	return r, pool.Close, nil
 }
 
 func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supabaseauth.Verifier) {

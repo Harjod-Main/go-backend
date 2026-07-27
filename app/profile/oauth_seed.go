@@ -60,6 +60,24 @@ func isGenericDisplayName(name string) bool {
 	}
 }
 
+func isEmailDerivedDisplayName(name, email string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(name))
+	if trimmed == "" || isGenericDisplayName(trimmed) {
+		return false
+	}
+	local := strings.TrimSpace(strings.ToLower(defaultDisplayName(email)))
+	return local != "" && !isGenericDisplayName(local) && trimmed == local
+}
+
+func shouldBackfillDisplayName(existingName, email, seedName string) bool {
+	seedName = strings.TrimSpace(seedName)
+	if seedName == "" || isGenericDisplayName(seedName) || isEmailDerivedDisplayName(seedName, email) {
+		return false
+	}
+	existingName = strings.TrimSpace(existingName)
+	return isGenericDisplayName(existingName) || isEmailDerivedDisplayName(existingName, email)
+}
+
 func isGenericUsername(username string) bool {
 	switch strings.TrimSpace(strings.ToLower(username)) {
 	case "", "user":

@@ -54,7 +54,7 @@ RETURNING user_id::text, display_name, username, avatar_url, created_at, updated
 func (r *postgresRepo) Ensure(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error) {
 	existing, err := r.GetByUserID(ctx, userID)
 	if err == nil {
-		return r.maybeBackfillOAuth(ctx, userID, existing, seed)
+		return r.maybeBackfillOAuth(ctx, userID, email, existing, seed)
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -89,7 +89,7 @@ func (r *postgresRepo) Ensure(ctx context.Context, userID, email string, seed OA
 		if isUniqueViolation(err) {
 			// Race: another request created the profile, or username collision.
 			if existing, getErr := r.GetByUserID(ctx, userID); getErr == nil {
-				return r.maybeBackfillOAuth(ctx, userID, existing, seed)
+				return r.maybeBackfillOAuth(ctx, userID, email, existing, seed)
 			}
 			continue
 		}
@@ -108,9 +108,9 @@ WHERE user_id = $1::uuid
 RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
 `
 
-func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, existing *Profile, seed OAuthSeed) (*Profile, error) {
+func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, email string, existing *Profile, seed OAuthSeed) (*Profile, error) {
 	displayName := strings.TrimSpace(seed.DisplayName)
-	needsDisplay := isGenericDisplayName(existing.DisplayName) && !isGenericDisplayName(displayName)
+	needsDisplay := shouldBackfillDisplayName(existing.DisplayName, email, displayName)
 	needsAvatar := existing.AvatarURL == nil && seed.AvatarURL != nil
 
 	if !needsDisplay && !needsAvatar {

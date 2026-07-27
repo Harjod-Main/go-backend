@@ -58,8 +58,8 @@ func TestCreateQuotes_BatchLoadsRatesOnce(t *testing.T) {
 	r.Len(body.Data, 2)
 	r.Equal(id1, body.Data[0].PlaceID)
 	r.Equal(id2, body.Data[1].PlaceID)
-	r.Equal(80.0, body.Data[0].Total)
-	r.Equal(80.0, body.Data[1].Total)
+	r.Equal(int64(8000), body.Data[0].TotalSatang)
+	r.Equal(int64(8000), body.Data[1].TotalSatang)
 }
 
 func TestCreateQuotes_InvalidPlaceID(t *testing.T) {

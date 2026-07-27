@@ -38,12 +38,12 @@ func (h *Handler) Me(c *gin.Context) {
 		Role:   claims.Role,
 	}
 
-	seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-
 	if h.profileRepo != nil {
-		p, err := h.profileRepo.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed)
+		p, err := h.profileRepo.GetByUserID(c.Request.Context(), claims.Sub)
 		if err != nil {
-			slog.Error("ensure profile on /me failed", "user_id", claims.Sub, "error", err)
+			if err != profile.ErrNotFound {
+				slog.Error("get profile on /me failed", "user_id", claims.Sub, "error", err)
+			}
 		} else if p != nil {
 			resp.DisplayName = p.DisplayName
 			resp.Username = p.Username

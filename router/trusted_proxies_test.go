@@ -15,7 +15,7 @@ func TestTrustedProxyCIDRs_Defaults(t *testing.T) {
 
 	config.Env = "PROD"
 	prod := trustedProxyCIDRs(config.Config{})
-	r.Equal(defaultPrivateProxyCIDRs, prod)
+	r.Nil(prod)
 
 	config.Env = "LOCAL"
 	localCIDRs := trustedProxyCIDRs(config.Config{})

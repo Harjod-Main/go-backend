@@ -22,7 +22,7 @@ func TestCalculateQuote_FreeWithinAllowance(t *testing.T) {
 	}
 
 	quote := places.CalculateQuote("p1", 0.5, rate)
-	r.Equal(0.0, quote.Total)
+	r.Equal(int64(0), quote.TotalSatang)
 	r.Equal(0.0, quote.ChargeableHours)
 	r.Equal(30, quote.FreeMinutesApplied)
 }
@@ -38,7 +38,7 @@ func TestCalculateQuote_FullyFree(t *testing.T) {
 	}
 
 	quote := places.CalculateQuote("p1", 5, rate)
-	r.Equal(0.0, quote.Total)
+	r.Equal(int64(0), quote.TotalSatang)
 	r.Equal(-1, quote.FreeMinutesApplied)
 }
 
@@ -57,7 +57,7 @@ func TestCalculateQuote_HourlyTiers(t *testing.T) {
 	// 3 hours → 2h@20 + 1h@20 = 60
 	quote := places.CalculateQuote("p1", 3, rate)
 	r.Equal(3.0, quote.ChargeableHours)
-	r.Equal(60.0, quote.Total)
+	r.Equal(int64(6000), quote.TotalSatang)
 	r.False(quote.DailyMaxApplied)
 }
 
@@ -74,7 +74,7 @@ func TestCalculateQuote_RoundsUpPartialHour(t *testing.T) {
 	// 1 hour stay, 15 min free → 45 min billable → ceil to 1 hour → 40
 	quote := places.CalculateQuote("p1", 1, rate)
 	r.Equal(1.0, quote.ChargeableHours)
-	r.Equal(40.0, quote.Total)
+	r.Equal(int64(4000), quote.TotalSatang)
 }
 
 func TestCalculateQuote_DailyMaxCap(t *testing.T) {
@@ -89,8 +89,8 @@ func TestCalculateQuote_DailyMaxCap(t *testing.T) {
 	}
 
 	quote := places.CalculateQuote("p1", 5, rate)
-	r.Equal(250.0, quote.Subtotal)
-	r.Equal(100.0, quote.Total)
+	r.Equal(int64(25000), quote.SubtotalSatang)
+	r.Equal(int64(10000), quote.TotalSatang)
 	r.True(quote.DailyMaxApplied)
 }
 
@@ -107,5 +107,5 @@ func TestCalculateQuote_FlatTierOnce(t *testing.T) {
 
 	// 4 hours → flat 10 once for hours 0-1, then hourly 20 for hours 2 and 3 → 10+20+20=50
 	quote := places.CalculateQuote("p1", 4, rate)
-	r.Equal(50.0, quote.Total)
+	r.Equal(int64(5000), quote.TotalSatang)
 }

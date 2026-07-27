@@ -8,18 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// defaultPrivateProxyCIDRs covers typical PaaS load balancers (Render, Fly, etc.)
-// that connect from RFC1918 / link-local addresses and set X-Forwarded-For.
-var defaultPrivateProxyCIDRs = []string{
-	"127.0.0.1/32",
-	"10.0.0.0/8",
-	"172.16.0.0/12",
-	"192.168.0.0/16",
-	"::1/128",
-	"fc00::/7",
-	"fe80::/10",
-}
-
+// defaultLocalProxyCIDRs is used only for ENV=LOCAL (direct dev server / emulator).
 var defaultLocalProxyCIDRs = []string{
 	"127.0.0.1/32",
 	"::1/128",
@@ -43,7 +32,9 @@ func trustedProxyCIDRs(cfg config.Config) []string {
 	if config.IsLocalEnv() {
 		return append([]string(nil), defaultLocalProxyCIDRs...)
 	}
-	return append([]string(nil), defaultPrivateProxyCIDRs...)
+	// Non-local deploys must set TRUSTED_PROXY_CIDRS to the LB ingress CIDR(s).
+	// Do not default to broad RFC1918 — shared NAT/LB ranges allow X-Forwarded-For spoofing.
+	return nil
 }
 
 func splitCSV(raw string) []string {

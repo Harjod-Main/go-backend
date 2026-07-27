@@ -36,9 +36,16 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 
-	seed := OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-	p, err := h.repo.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed)
+	p, err := h.repo.GetByUserID(c.Request.Context(), claims.Sub)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			wrapper.Respond(c, wrapper.ResponseOption[Profile]{
+				HTTPStatus: http.StatusNotFound,
+				Code:       app.CodeNotFound,
+				Message:    app.MessageNotFound,
+			})
+			return
+		}
 		slog.Error("get profile failed", "user_id", claims.Sub, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[Profile]{
 			HTTPStatus: http.StatusInternalServerError,
