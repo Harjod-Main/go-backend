@@ -62,3 +62,24 @@ func TestUseNonePrefixEnvAsDefaultValue(t *testing.T) {
 		assert.Equal(t, "localhost", de.EndpointURL)
 	})
 }
+
+func TestParseEnv_KeepsBaseWhenPrefixedNotEmptyFails(t *testing.T) {
+	type prodLike struct {
+		Port                string `env:"PORT,notEmpty"`
+		EnableDebugClientIP bool   `env:"ENABLE_DEBUG_CLIENT_IP"`
+	}
+
+	os.Setenv("PORT", "8080")
+	os.Setenv("ENABLE_DEBUG_CLIENT_IP", "true")
+	os.Unsetenv("PROD_PORT")
+	os.Unsetenv("PROD_ENABLE_DEBUG_CLIENT_IP")
+	defer os.Unsetenv("PORT")
+	defer os.Unsetenv("ENABLE_DEBUG_CLIENT_IP")
+
+	opts := env.Options{Prefix: prefix("PROD")}
+	cfg, err := parseEnv[prodLike](opts)
+
+	assert.Nil(t, err)
+	assert.Equal(t, "8080", cfg.Port)
+	assert.True(t, cfg.EnableDebugClientIP)
+}

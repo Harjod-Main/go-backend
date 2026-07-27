@@ -26,7 +26,7 @@ type Server struct {
 	TrustedProxyCIDRs string `env:"TRUSTED_PROXY_CIDRS"`
 	// Temporary: expose GET /debug/client-ip to discover LB RemoteAddr for TRUSTED_PROXY_CIDRS.
 	// Turn off after configuring proxies — do not leave enabled in production long-term.
-	EnableDebugClientIP bool `env:"ENABLE_DEBUG_CLIENT_IP" envDefault:"false"`
+	EnableDebugClientIP bool `env:"ENABLE_DEBUG_CLIENT_IP"`
 }
 
 type AccessControl struct {

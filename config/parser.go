@@ -7,22 +7,27 @@ import (
 )
 
 func parseEnv[T any](opts env.Options) (T, error) {
-	var t T
+	var base T
 
-	// Pass 1: parse without prefix so non-prefixed env vars (e.g. ENDPOINT_URL)
+	// Pass 1: parse without prefix so non-prefixed env vars (e.g. PORT)
 	// act as the base/default values.
-	if err := env.Parse(&t); err != nil {
-		return t, err
+	if err := env.Parse(&base); err != nil {
+		return base, err
 	}
 
-	// Pass 2: re-parse with the prefix so PREFIX_XXX_XXX overrides the base
-	// value when set. Errors here are logged rather than returned: a missing
-	// prefixed var is expected (falls back to the pass-1 value), but a
-	// malformed one (e.g. bad type conversion) would otherwise fail silently,
-	// so surface it instead of swallowing it outright.
-	if err := env.ParseWithOptions(&t, opts); err != nil {
+	if opts.Prefix == "" {
+		return base, nil
+	}
+
+	// Pass 2: re-parse into a copy so PREFIX_XXX can override. On failure
+	// (common when PROD_* vars are unset on PaaS), keep the pass-1 values —
+	// ParseWithOptions may partially mutate the target with envDefault before
+	// returning notEmpty errors.
+	override := base
+	if err := env.ParseWithOptions(&override, opts); err != nil {
 		slog.Warn("parseEnv: prefixed override failed, falling back to base value", "prefix", opts.Prefix, "error", err)
+		return base, nil
 	}
 
-	return t, nil
+	return override, nil
 }
