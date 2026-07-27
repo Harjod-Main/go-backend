@@ -21,3 +21,39 @@ func TestPrefixEnv(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateFoundation_ProdCORS(t *testing.T) {
+	prev := Env
+	t.Cleanup(func() { Env = prev })
+
+	base := Config{
+		Supabase: Supabase{ProjectURL: "https://example.supabase.co"},
+	}
+
+	t.Run("PROD rejects star", func(t *testing.T) {
+		Env = Prod
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "*"
+		if err := validateFoundation(cfg); err == nil {
+			t.Fatal("expected error for ACCESS_CONTROL_ALLOW_ORIGIN=* in PROD")
+		}
+	})
+
+	t.Run("PROD accepts explicit origin", func(t *testing.T) {
+		Env = Prod
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
+		if err := validateFoundation(cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("LOCAL allows star", func(t *testing.T) {
+		Env = Local
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "*"
+		if err := validateFoundation(cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
