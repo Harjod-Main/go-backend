@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -77,7 +78,7 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		})
 		return
 	}
-	if len(body.PhotoURLs) > 5 {
+	if len(body.PhotoURLs) > 5 || !mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) {
 		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
 			HTTPStatus: http.StatusBadRequest,
 			Code:       app.CodeBadRequest,
@@ -263,6 +264,29 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 			Message:    app.MessageNotFound,
 		})
 		return
+	}
+	if len(body.PhotoURLs) > 5 || !mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) {
+		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	if body.PhotoURL != nil {
+		trimmed := strings.TrimSpace(*body.PhotoURL)
+		if trimmed == "" {
+			body.PhotoURL = nil
+		} else if !mediaurl.ValidMediaURLs([]string{trimmed}, mediaurl.MaxURLLen) {
+			wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
+		} else {
+			body.PhotoURL = &trimmed
+		}
 	}
 
 	feedback := PlaceFeedback{

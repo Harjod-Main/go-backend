@@ -6,14 +6,25 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/submissions"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+const testMediaPrefix = "https://sycwdwymeirxowbrqdgd.supabase.co/storage/v1/object/public/media/"
+
+func TestMain(m *testing.M) {
+	mediaurl.Configure("https://sycwdwymeirxowbrqdgd.supabase.co")
+	code := m.Run()
+	mediaurl.ResetForTest()
+	os.Exit(code)
+}
 
 type stubRepo struct {
 	createCalled bool
@@ -30,8 +41,8 @@ func validSubmissionBody() map[string]any {
 		"latitude":      13.7466,
 		"longitude":     100.5347,
 		"amenities":     []string{"covered"},
-		"photoUrls":     []string{"https://example.com/a.jpg"},
-		"ratePhotoUrls": []string{"https://example.com/rate.jpg"},
+		"photoUrls":     []string{testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/a.jpg"},
+		"ratePhotoUrls": []string{testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/rate.jpg"},
 	}
 }
 
@@ -104,7 +115,7 @@ func TestCreate_RejectsOversizedBody(t *testing.T) {
 	r := require.New(t)
 
 	body := validSubmissionBody()
-	body["photoUrls"] = []string{"https://example.com/" + strings.Repeat("x", 260*1024)}
+	body["photoUrls"] = []string{testMediaPrefix + strings.Repeat("x", 260*1024)}
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 

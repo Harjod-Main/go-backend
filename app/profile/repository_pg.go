@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -108,6 +109,14 @@ WHERE user_id = $1::uuid
 RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
 `
 
+func (r *postgresRepo) SyncFromOAuth(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error) {
+	existing, err := r.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return r.maybeBackfillOAuth(ctx, userID, email, existing, seed)
+}
+
 func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, email string, existing *Profile, seed OAuthSeed) (*Profile, error) {
 	displayName := strings.TrimSpace(seed.DisplayName)
 	needsDisplay := shouldBackfillDisplayName(existing.DisplayName, email, displayName)
@@ -121,10 +130,14 @@ func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, em
 	if needsDisplay {
 		displayPtr = &displayName
 	}
+	var avatarPtr *string
+	if needsAvatar {
+		avatarPtr = seed.AvatarURL
+	}
 
 	now := time.Now()
 	var p Profile
-	err := r.pool.QueryRow(ctx, backfillOAuthSQL, userID, displayPtr, seed.AvatarURL, now).Scan(
+	err := r.pool.QueryRow(ctx, backfillOAuthSQL, userID, displayPtr, avatarPtr, now).Scan(
 		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -168,7 +181,7 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 		if trimmed == "" {
 			clearAvatar = true
 			avatarURL = nil
-		} else if len(trimmed) > 2048 {
+		} else if !mediaurl.ValidAvatarValue(trimmed) {
 			return nil, ErrInvalidAvatarURL
 		} else {
 			avatarURL = &trimmed

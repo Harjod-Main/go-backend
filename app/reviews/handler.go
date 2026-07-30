@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -108,6 +109,14 @@ func (h *Handler) Create(c *gin.Context) {
 			HTTPStatus: http.StatusBadRequest,
 			Code:       app.CodeBadRequest,
 			Message:    "rating must be between 1 and 5",
+		})
+		return
+	}
+	if len(body.PhotoURLs) > 5 || !mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
 		})
 		return
 	}

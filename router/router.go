@@ -6,6 +6,7 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth"
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-backend/app/reports"
@@ -51,6 +52,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	if err != nil {
 		return nil, nil, err
 	}
+	mediaurl.Configure(cfg.Supabase.ProjectURL)
 	placesHandler := places.NewHandler(places.HandlerConfig{
 		Repo: places.NewPostgresRepo(pool),
 	})

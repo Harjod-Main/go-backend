@@ -22,5 +22,8 @@ func IsValidationError(err error) bool {
 type Repository interface {
 	GetByUserID(ctx context.Context, userID string) (*Profile, error)
 	Ensure(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error)
+	// SyncFromOAuth backfills OAuth display name / avatar onto an existing profile.
+	// It never creates a row; returns ErrNotFound when the profile is missing.
+	SyncFromOAuth(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error)
 	Update(ctx context.Context, userID string, displayName, username *string, avatarURL *string, clearAvatar bool) (*Profile, error)
 }

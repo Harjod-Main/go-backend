@@ -37,6 +37,11 @@ func (s *stubProfileRepo) Ensure(context.Context, string, string, profile.OAuthS
 	return nil, nil
 }
 
+func (s *stubProfileRepo) SyncFromOAuth(context.Context, string, string, profile.OAuthSeed) (*profile.Profile, error) {
+	s.getCalls.Add(1)
+	return s.getProfile, s.getErr
+}
+
 func (s *stubProfileRepo) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
 	s.updateCalls.Add(1)
 	return nil, nil
@@ -146,7 +151,7 @@ func TestMe_DoesNotCreateMissingProfile(t *testing.T) {
 
 	r.Equal(http.StatusOK, w.Code)
 	r.Equal(int32(1), repo.getCalls.Load())
-	r.Equal(int32(0), repo.ensureCalls.Load())
+	r.Equal(int32(0), repo.ensureCalls.Load(), "GET /me must not create a missing profile")
 
 	var body struct {
 		Data auth.MeResponse `json:"data"`
@@ -155,4 +160,51 @@ func TestMe_DoesNotCreateMissingProfile(t *testing.T) {
 	r.Equal("11111111-1111-1111-1111-111111111111", body.Data.UserID)
 	r.Equal("user@example.com", body.Data.Email)
 	r.Empty(body.Data.Username)
+}
+
+func TestMe_BackfillsExistingProfileFromOAuth(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	avatar := "https://lh3.googleusercontent.com/a/example"
+	repo := &stubProfileRepo{
+		getProfile: &profile.Profile{
+			UserID:      "11111111-1111-1111-1111-111111111111",
+			DisplayName: "aif912752",
+			Username:    "aif912752",
+			AvatarURL:   &avatar,
+		},
+	}
+	handler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: repo})
+
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub:   "11111111-1111-1111-1111-111111111111",
+			Email: "aif912752@gmail.com",
+			Role:  "authenticated",
+			UserMetadata: map[string]any{
+				"full_name":  "Harjod Tester",
+				"avatar_url": avatar,
+			},
+		})
+		c.Next()
+	})
+	engine.GET("/api/v1/auth/me", handler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal(int32(1), repo.getCalls.Load())
+	r.Equal(int32(0), repo.ensureCalls.Load())
+
+	var body struct {
+		Data auth.MeResponse `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal("aif912752", body.Data.DisplayName)
+	r.NotNil(body.Data.AvatarURL)
+	r.Equal(avatar, *body.Data.AvatarURL)
 }

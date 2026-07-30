@@ -39,10 +39,11 @@ func (h *Handler) Me(c *gin.Context) {
 	}
 
 	if h.profileRepo != nil {
-		p, err := h.profileRepo.GetByUserID(c.Request.Context(), claims.Sub)
+		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+		p, err := h.profileRepo.SyncFromOAuth(c.Request.Context(), claims.Sub, claims.Email, seed)
 		if err != nil {
 			if err != profile.ErrNotFound {
-				slog.Error("get profile on /me failed", "user_id", claims.Sub, "error", err)
+				slog.Error("sync profile on /me failed", "user_id", claims.Sub, "error", err)
 			}
 		} else if p != nil {
 			resp.DisplayName = p.DisplayName

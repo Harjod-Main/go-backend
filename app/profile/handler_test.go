@@ -36,6 +36,11 @@ func (s *stubRepo) Ensure(context.Context, string, string, profile.OAuthSeed) (*
 	return s.getProfile, nil
 }
 
+func (s *stubRepo) SyncFromOAuth(context.Context, string, string, profile.OAuthSeed) (*profile.Profile, error) {
+	s.getCalls.Add(1)
+	return s.getProfile, s.getErr
+}
+
 func (s *stubRepo) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
 	s.updateCalls.Add(1)
 	return s.updateOut, s.updateErr

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -92,8 +93,8 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	if !validStringItems(body.Amenities, maxSubmissionStringItemLen) ||
-		!validStringItems(body.PhotoURLs, 2048) ||
-		!validStringItems(body.RatePhotoURLs, 2048) ||
+		!mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) ||
+		!mediaurl.ValidMediaURLs(body.RatePhotoURLs, mediaurl.MaxURLLen) ||
 		!validStringItems(body.SpecialConditions, maxSubmissionStringItemLen) ||
 		!validRawJSONSize(body.OpeningHours) ||
 		!validRawJSONSize(body.RateTiers) ||
