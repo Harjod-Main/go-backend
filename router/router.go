@@ -39,7 +39,6 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	}
 
 	r.GET("/liveness", health.Liveness(version, commit))
-	r.GET("/metrics", localmw.MetricsBearerAuth(cfg.Server.MetricsBearerToken), health.Metrics())
 	r.GET("/readiness", health.Readiness())
 	registerDebugRoutes(r, cfg)
 
