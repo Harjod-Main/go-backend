@@ -40,7 +40,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 
 	r.Use(
 		middleware.SecurityHeaders(),
-		middleware.AccessControl(cfg.AccessControl.AllowOrigin, allowedHeaders(cfg.Header.RefIDHeaderKey)),
+		localmw.CORS(cfg.AccessControl.AllowOrigin, allowedHeaders(cfg.Header.RefIDHeaderKey)),
 		app.TraceContextTraceIDMiddleware(""),
 		app.RefIDMiddleware(cfg.Header.RefIDHeaderKey),
 		app.AutoLoggingMiddleware,
