@@ -22,11 +22,14 @@ type Server struct {
 	Hostname string `env:"HOSTNAME"`
 	Port     string `env:"PORT,notEmpty"`
 	// Comma-separated CIDRs/IPs for gin SetTrustedProxies (X-Forwarded-For / rate-limit ClientIP).
-	// Required when ENV=PROD (unless EnableDebugClientIP). Empty LOCAL uses loopback only.
+	// Required when ENV=PROD. Empty LOCAL uses loopback only.
 	TrustedProxyCIDRs string `env:"TRUSTED_PROXY_CIDRS"`
 	// Temporary: expose GET /debug/client-ip to discover LB RemoteAddr for TRUSTED_PROXY_CIDRS.
-	// Turn off after configuring proxies — do not leave enabled in production long-term.
+	// Allowed only outside PROD (LOCAL/DEV/UAT). Refused at startup in PROD.
 	EnableDebugClientIP bool `env:"ENABLE_DEBUG_CLIENT_IP"`
+	// Bearer token required for GET /metrics. Required in PROD; optional elsewhere
+	// (when empty outside PROD, /metrics stays open for local scraping).
+	MetricsBearerToken string `env:"SECRET_METRICS_BEARER_TOKEN"`
 }
 
 type AccessControl struct {
@@ -99,8 +102,14 @@ func validateFoundation(cfg Config) error {
 		if origin == "" || origin == "*" {
 			return fmt.Errorf("ACCESS_CONTROL_ALLOW_ORIGIN must be an explicit frontend origin in PROD (refusing *)")
 		}
-		if strings.TrimSpace(cfg.Server.TrustedProxyCIDRs) == "" && !cfg.Server.EnableDebugClientIP {
-			return fmt.Errorf("TRUSTED_PROXY_CIDRS is required in PROD (set your load balancer ingress CIDR, not broad RFC1918); set ENABLE_DEBUG_CLIENT_IP=true temporarily to discover RemoteAddr via GET /debug/client-ip")
+		if cfg.Server.EnableDebugClientIP {
+			return fmt.Errorf("ENABLE_DEBUG_CLIENT_IP must be false in PROD; discover TRUSTED_PROXY_CIDRS on DEV/UAT instead")
+		}
+		if strings.TrimSpace(cfg.Server.TrustedProxyCIDRs) == "" {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS is required in PROD (set your load balancer ingress CIDR, not broad RFC1918); discover RemoteAddr via GET /debug/client-ip on DEV/UAT with ENABLE_DEBUG_CLIENT_IP=true")
+		}
+		if strings.TrimSpace(cfg.Server.MetricsBearerToken) == "" {
+			return fmt.Errorf("SECRET_METRICS_BEARER_TOKEN is required in PROD to protect GET /metrics")
 		}
 	}
 	return nil

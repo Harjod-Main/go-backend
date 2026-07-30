@@ -25,9 +25,33 @@ func TestDebugClientIP_DisabledByDefault(t *testing.T) {
 	r.Equal(http.StatusNotFound, w.Code)
 }
 
+func TestDebugClientIP_DisabledInProdEvenWhenFlagSet(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	prev := config.Env
+	t.Cleanup(func() { config.Env = prev })
+	config.Env = config.Prod
+
+	engine := gin.New()
+	registerDebugRoutes(engine, config.Config{
+		Server: config.Server{EnableDebugClientIP: true},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/client-ip", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusNotFound, w.Code)
+}
+
 func TestDebugClientIP_ReturnsRemoteAddrAndHeaders(t *testing.T) {
 	r := require.New(t)
 	gin.SetMode(gin.TestMode)
+
+	prev := config.Env
+	t.Cleanup(func() { config.Env = prev })
+	config.Env = config.Local
 
 	engine := gin.New()
 	registerDebugRoutes(engine, config.Config{

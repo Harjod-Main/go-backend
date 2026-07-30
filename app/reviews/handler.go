@@ -1,6 +1,7 @@
 package reviews
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -168,6 +169,105 @@ func (h *Handler) Create(c *gin.Context) {
 
 	wrapper.Respond(c, wrapper.ResponseOption[Review]{
 		HTTPStatus: http.StatusCreated,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data:       &review,
+	})
+}
+
+// Update handles PATCH /api/v1/reviews/:reviewId (auth required, owner only).
+func (h *Handler) Update(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	reviewID := strings.TrimSpace(c.Param("reviewId"))
+	if _, err := uuid.Parse(reviewID); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxReviewCreateBodyBytes)
+	var body UpdateReviewRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	if body.Rating < 1 || body.Rating > 5 {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    "rating must be between 1 and 5",
+		})
+		return
+	}
+	if len(body.PhotoURLs) > 5 || !mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	var description *string
+	if body.Description != nil {
+		trimmed := strings.TrimSpace(*body.Description)
+		if len(trimmed) > maxReviewDescriptionLen {
+			wrapper.Respond(c, wrapper.ResponseOption[Review]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
+		}
+		if trimmed != "" {
+			description = &trimmed
+		}
+	}
+
+	review := Review{
+		ReviewID:    reviewID,
+		UserID:      claims.Sub,
+		Rating:      body.Rating,
+		Description: description,
+		PhotoURLs:   body.PhotoURLs,
+	}
+
+	if err := h.repo.Update(c.Request.Context(), claims.Sub, &review); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			wrapper.Respond(c, wrapper.ResponseOption[Review]{
+				HTTPStatus: http.StatusNotFound,
+				Code:       app.CodeNotFound,
+				Message:    app.MessageNotFound,
+			})
+			return
+		}
+		slog.Error("update review failed", "review_id", reviewID, "user_id", claims.Sub, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+
+	wrapper.Respond(c, wrapper.ResponseOption[Review]{
+		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
 		Message:    app.MessageSuccess,
 		Data:       &review,

@@ -39,7 +39,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	}
 
 	r.GET("/liveness", health.Liveness(version, commit))
-	r.GET("/metrics", health.Metrics())
+	r.GET("/metrics", localmw.MetricsBearerAuth(cfg.Server.MetricsBearerToken), health.Metrics())
 	r.GET("/readiness", health.Readiness())
 	registerDebugRoutes(r, cfg)
 
@@ -138,6 +138,12 @@ func registerReviewsRoutes(r *gin.Engine, reviewsHandler *reviews.Handler, verif
 	reviewWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
 	{
 		reviewWrites.POST("", reviewsHandler.Create)
+	}
+
+	reviewMutations := r.Group("/api/v1/reviews/:reviewId")
+	reviewMutations.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		reviewMutations.PATCH("", reviewsHandler.Update)
 	}
 }
 

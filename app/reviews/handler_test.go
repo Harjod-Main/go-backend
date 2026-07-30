@@ -32,6 +32,10 @@ type stubRepo struct {
 	created      *reviews.Review
 	createErr    error
 
+	updateCalled bool
+	updated      *reviews.Review
+	updateErr    error
+
 	listItems []reviews.Review
 	listTotal int
 	listErr   error
@@ -51,6 +55,22 @@ func (s *stubRepo) Create(_ context.Context, review *reviews.Review) error {
 	}
 	review.ReviewID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
 	s.created = review
+	return nil
+}
+
+func (s *stubRepo) Update(_ context.Context, userID string, review *reviews.Review) error {
+	s.updateCalled = true
+	if s.updateErr != nil {
+		return s.updateErr
+	}
+	review.UserID = userID
+	if review.PlaceID == "" {
+		review.PlaceID = testPlaceID
+	}
+	if review.DisplayName == "" {
+		review.DisplayName = "u"
+	}
+	s.updated = review
 	return nil
 }
 
@@ -406,4 +426,87 @@ func TestCreate_RejectsOversizedBody(t *testing.T) {
 	w := performCreate(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createCalled)
+}
+
+const testReviewID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+
+func performUpdate(
+	t *testing.T,
+	repo *stubRepo,
+	reviewID string,
+	payload []byte,
+	withAuth bool,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	handler := reviews.NewHandler(reviews.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.PATCH("/api/v1/reviews/:reviewId", func(c *gin.Context) {
+		if withAuth {
+			c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+				Sub:   testUserID,
+				Email: "user@example.com",
+			})
+		}
+		handler.Update(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/reviews/"+reviewID, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	return w
+}
+
+func TestUpdate_Success(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+	desc := "updated description"
+	payload, err := json.Marshal(map[string]any{
+		"rating":      5,
+		"description": desc,
+		"photoUrls":   []string{testMediaPrefix + testUserID + "/reviews/a.jpg"},
+	})
+	r.NoError(err)
+
+	w := performUpdate(t, repo, testReviewID, payload, true)
+	r.Equal(http.StatusOK, w.Code)
+	r.True(repo.updateCalled)
+	r.Equal(5, repo.updated.Rating)
+	r.Equal(desc, *repo.updated.Description)
+	r.Equal(testUserID, repo.updated.UserID)
+}
+
+func TestUpdate_RejectsUnauthenticated(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+	payload, err := json.Marshal(map[string]any{"rating": 4})
+	r.NoError(err)
+
+	w := performUpdate(t, repo, testReviewID, payload, false)
+	r.Equal(http.StatusUnauthorized, w.Code)
+	r.False(repo.updateCalled)
+}
+
+func TestUpdate_RejectsInvalidReviewID(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+	payload, err := json.Marshal(map[string]any{"rating": 4})
+	r.NoError(err)
+
+	w := performUpdate(t, repo, "not-a-uuid", payload, true)
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.False(repo.updateCalled)
+}
+
+func TestUpdate_NotFound(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{updateErr: reviews.ErrNotFound}
+	payload, err := json.Marshal(map[string]any{"rating": 4})
+	r.NoError(err)
+
+	w := performUpdate(t, repo, testReviewID, payload, true)
+	r.Equal(http.StatusNotFound, w.Code)
+	r.True(repo.updateCalled)
 }

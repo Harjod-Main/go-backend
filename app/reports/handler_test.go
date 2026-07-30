@@ -18,6 +18,7 @@ import (
 )
 
 const testMediaPrefix = "https://sycwdwymeirxowbrqdgd.supabase.co/storage/v1/object/public/media/"
+const testReportPath = testUserID + "/reports/photo.jpg"
 const testUserID = "11111111-1111-1111-1111-111111111111"
 const testPlaceID = "22222222-2222-2222-2222-222222222222"
 const testReviewID = "33333333-3333-3333-3333-333333333333"
@@ -240,13 +241,42 @@ func TestCreateIssueReport_RejectsTooManyPhotoURLs(t *testing.T) {
 	body := validIssueReportBody()
 	urls := make([]string, 6)
 	for i := range urls {
-		urls[i] = testMediaPrefix + testUserID + "/reports/photo.jpg"
+		urls[i] = testReportPath
 	}
 	body["photoUrls"] = urls
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
 	w := performCreateIssueReport(t, repo, payload, false)
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.False(repo.createIssueCalled)
+}
+
+func TestCreateIssueReport_AcceptsPrivateReportPaths(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+
+	body := validIssueReportBody()
+	body["photoUrls"] = []string{testReportPath}
+	payload, err := json.Marshal(body)
+	r.NoError(err)
+
+	w := performCreateIssueReport(t, repo, payload, true)
+	r.Equal(http.StatusCreated, w.Code)
+	r.True(repo.createIssueCalled)
+	r.Equal([]string{testReportPath}, repo.createdIssue.PhotoURLs)
+}
+
+func TestCreateIssueReport_RejectsPublicPhotoURLs(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+
+	body := validIssueReportBody()
+	body["photoUrls"] = []string{testMediaPrefix + testUserID + "/reports/photo.jpg"}
+	payload, err := json.Marshal(body)
+	r.NoError(err)
+
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createIssueCalled)
 }

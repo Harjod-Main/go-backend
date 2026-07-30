@@ -43,26 +43,40 @@ func TestValidateFoundation_ProdCORS(t *testing.T) {
 		Env = Prod
 		cfg := base
 		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
+		cfg.Server.MetricsBearerToken = "metrics-secret"
 		if err := validateFoundation(cfg); err == nil {
 			t.Fatal("expected error when TRUSTED_PROXY_CIDRS is empty in PROD")
 		}
 	})
 
-	t.Run("PROD allows empty trusted proxies when debug client IP is enabled", func(t *testing.T) {
-		Env = Prod
-		cfg := base
-		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
-		cfg.Server.EnableDebugClientIP = true
-		if err := validateFoundation(cfg); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	t.Run("PROD accepts explicit origin and trusted proxy CIDRs", func(t *testing.T) {
+	t.Run("PROD rejects ENABLE_DEBUG_CLIENT_IP", func(t *testing.T) {
 		Env = Prod
 		cfg := base
 		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
 		cfg.Server.TrustedProxyCIDRs = "10.0.0.1/32"
+		cfg.Server.MetricsBearerToken = "metrics-secret"
+		cfg.Server.EnableDebugClientIP = true
+		if err := validateFoundation(cfg); err == nil {
+			t.Fatal("expected error when ENABLE_DEBUG_CLIENT_IP is true in PROD")
+		}
+	})
+
+	t.Run("PROD rejects missing metrics bearer token", func(t *testing.T) {
+		Env = Prod
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
+		cfg.Server.TrustedProxyCIDRs = "10.0.0.1/32"
+		if err := validateFoundation(cfg); err == nil {
+			t.Fatal("expected error when SECRET_METRICS_BEARER_TOKEN is empty in PROD")
+		}
+	})
+
+	t.Run("PROD accepts explicit origin, trusted proxy CIDRs, and metrics token", func(t *testing.T) {
+		Env = Prod
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
+		cfg.Server.TrustedProxyCIDRs = "10.0.0.1/32"
+		cfg.Server.MetricsBearerToken = "metrics-secret"
 		if err := validateFoundation(cfg); err != nil {
 			t.Fatal(err)
 		}

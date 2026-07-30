@@ -419,7 +419,7 @@ func (v *Verifier) validateClaims(claims *Claims) error {
 	if claims.Iss != v.issuer {
 		return fmt.Errorf("invalid issuer: got %q want %q", claims.Iss, v.issuer)
 	}
-	if claims.Aud != "" && string(claims.Aud) != v.audience {
+	if string(claims.Aud) != v.audience {
 		return fmt.Errorf("invalid audience: got %q want %q", claims.Aud, v.audience)
 	}
 	if claims.Sub == "" {

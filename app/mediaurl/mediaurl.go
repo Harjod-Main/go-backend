@@ -13,6 +13,12 @@ var (
 	configuredOnce bool
 )
 
+const (
+	PublicBucketName       = "media"
+	PrivateReportsBucket   = "report-media"
+	privateReportsFolder   = "reports"
+)
+
 // Configure sets the only allowed public media URL prefix from SUPABASE_PROJECT_URL.
 // Example prefix: https://xxxx.supabase.co/storage/v1/object/public/media/
 func Configure(projectURL string) {
@@ -24,7 +30,7 @@ func Configure(projectURL string) {
 		configuredOnce = true
 		return
 	}
-	allowedPrefix = base + "/storage/v1/object/public/media/"
+	allowedPrefix = base + "/storage/v1/object/public/" + PublicBucketName + "/"
 	configuredOnce = true
 }
 
@@ -96,4 +102,44 @@ func ValidAvatarValue(value string) bool {
 		return len(trimmed) <= 32
 	}
 	return ValidMediaURLs([]string{trimmed}, MaxURLLen)
+}
+
+// ValidPrivateReportPaths returns true when every item is a safe object path under
+// the private reports bucket. Paths are stored server-side and later exchanged for
+// short-lived signed read URLs; raw public URLs are intentionally rejected.
+func ValidPrivateReportPaths(paths []string, maxLen int) bool {
+	if maxLen <= 0 {
+		maxLen = MaxURLLen
+	}
+	for _, item := range paths {
+		if !validOnePrivateReportPath(strings.TrimSpace(item), maxLen) {
+			return false
+		}
+	}
+	return true
+}
+
+func validOnePrivateReportPath(trimmed string, maxLen int) bool {
+	if trimmed == "" || len(trimmed) > maxLen {
+		return false
+	}
+	if strings.Contains(trimmed, `\`) || strings.ContainsAny(trimmed, "?#") {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return false
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 3 {
+		return false
+	}
+	if parts[0] == "" || parts[1] != privateReportsFolder || parts[len(parts)-1] == "" {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }

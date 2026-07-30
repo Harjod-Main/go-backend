@@ -229,3 +229,38 @@ func TestVerifier_AcceptsAudAsArray(t *testing.T) {
 	r.Equal(FlexibleString("authenticated"), claims.Aud)
 	r.Equal("a@b.c", claims.Email)
 }
+
+func TestVerifier_RejectsMissingAudience(t *testing.T) {
+	r := require.New(t)
+	fx := newES256Fixture(t)
+
+	now := time.Now().Unix()
+	token, err := SignES256ForTest(fx.privateKey, fx.kid, Claims{
+		Sub: "u1",
+		Iss: fx.projectURL + "/auth/v1",
+		Exp: now + 3600,
+		Iat: now,
+	})
+	r.NoError(err)
+
+	_, err = fx.verifier.Verify(token)
+	r.ErrorContains(err, "audience")
+}
+
+func TestVerifier_RejectsWrongAudience(t *testing.T) {
+	r := require.New(t)
+	fx := newES256Fixture(t)
+
+	now := time.Now().Unix()
+	token, err := SignES256ForTest(fx.privateKey, fx.kid, Claims{
+		Sub: "u1",
+		Iss: fx.projectURL + "/auth/v1",
+		Aud: "anon",
+		Exp: now + 3600,
+		Iat: now,
+	})
+	r.NoError(err)
+
+	_, err = fx.verifier.Verify(token)
+	r.ErrorContains(err, "audience")
+}

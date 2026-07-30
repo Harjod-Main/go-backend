@@ -1,6 +1,13 @@
 package reviews
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrNotFound = errors.New("review not found")
+)
 
 // Review is the DB row shape returned by list queries.
 type Review struct {
@@ -23,6 +30,13 @@ type ReviewListResponse struct {
 // CreateReviewRequest is the POST body for creating a review.
 type CreateReviewRequest struct {
 	PlaceID     string   `json:"placeId" binding:"required"`
+	Rating      int      `json:"rating" binding:"required,min=1,max=5"`
+	Description *string  `json:"description"`
+	PhotoURLs   []string `json:"photoUrls"`
+}
+
+// UpdateReviewRequest is the PATCH body for updating an owned review.
+type UpdateReviewRequest struct {
 	Rating      int      `json:"rating" binding:"required,min=1,max=5"`
 	Description *string  `json:"description"`
 	PhotoURLs   []string `json:"photoUrls"`

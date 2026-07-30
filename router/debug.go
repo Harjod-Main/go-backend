@@ -8,10 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// registerDebugRoutes adds temporary diagnostics. Remove ENABLE_DEBUG_CLIENT_IP after
-// capturing TRUSTED_PROXY_CIDRS from RemoteAddr on the host platform.
+// registerDebugRoutes adds temporary diagnostics for discovering TRUSTED_PROXY_CIDRS.
+// Never registered in PROD, even if ENABLE_DEBUG_CLIENT_IP is set.
 func registerDebugRoutes(r *gin.Engine, cfg config.Config) {
-	if !cfg.Server.EnableDebugClientIP {
+	if config.IsProdEnv() || !cfg.Server.EnableDebugClientIP {
 		return
 	}
 

@@ -149,7 +149,9 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		})
 		return
 	}
-	if len(body.PhotoURLs) > 5 || !mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) {
+	// Issue report photos live in a private bucket, so the client submits object
+	// paths instead of public URLs.
+	if len(body.PhotoURLs) > 5 || !mediaurl.ValidPrivateReportPaths(body.PhotoURLs, mediaurl.MaxURLLen) {
 		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
 			HTTPStatus: http.StatusBadRequest,
 			Code:       app.CodeBadRequest,

@@ -70,3 +70,31 @@ func TestValidAvatarValue(t *testing.T) {
 		t.Fatal("file avatar should be rejected")
 	}
 }
+
+func TestValidPrivateReportPaths(t *testing.T) {
+	t.Parallel()
+
+	good := "11111111-1111-1111-1111-111111111111/reports/a.jpg"
+
+	if !ValidPrivateReportPaths(nil, MaxURLLen) {
+		t.Fatal("nil slice should be valid")
+	}
+	if !ValidPrivateReportPaths([]string{}, MaxURLLen) {
+		t.Fatal("empty slice should be valid")
+	}
+	if !ValidPrivateReportPaths([]string{good}, MaxURLLen) {
+		t.Fatal("private report path should be valid")
+	}
+	if ValidPrivateReportPaths([]string{"https://example.com/a.jpg"}, MaxURLLen) {
+		t.Fatal("public URL should be rejected for private report paths")
+	}
+	if ValidPrivateReportPaths([]string{"/reports/a.jpg"}, MaxURLLen) {
+		t.Fatal("absolute path should be rejected")
+	}
+	if ValidPrivateReportPaths([]string{"111/reports/../a.jpg"}, MaxURLLen) {
+		t.Fatal("path traversal should be rejected")
+	}
+	if ValidPrivateReportPaths([]string{"111/avatar/a.jpg"}, MaxURLLen) {
+		t.Fatal("wrong folder should be rejected")
+	}
+}

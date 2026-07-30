@@ -2,9 +2,11 @@ package reviews
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -95,4 +97,40 @@ func (r *postgresRepo) Create(ctx context.Context, review *Review) error {
 		photos,
 		now,
 	).Scan(&review.ReviewID)
+}
+
+const updateReviewSQL = `
+UPDATE reviews
+SET rating = $1,
+    description = $2,
+    photo_urls = $3,
+    updated_at = $4
+WHERE review_id = $5::uuid
+  AND user_id = $6::uuid
+RETURNING place_id::text, display_name, created_at
+`
+
+func (r *postgresRepo) Update(ctx context.Context, userID string, review *Review) error {
+	now := time.Now()
+	photos := review.PhotoURLs
+	if photos == nil {
+		photos = []string{}
+	}
+
+	err := r.pool.QueryRow(ctx, updateReviewSQL,
+		review.Rating,
+		review.Description,
+		photos,
+		now,
+		review.ReviewID,
+		userID,
+	).Scan(&review.PlaceID, &review.DisplayName, &review.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("update review: %w", err)
+	}
+	review.UserID = userID
+	return nil
 }
