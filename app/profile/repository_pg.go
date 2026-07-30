@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -141,6 +142,7 @@ func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, em
 		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
+		slog.Error("oauth backfill update failed", "user_id", userID, "error", err)
 		return existing, nil
 	}
 	return &p, nil

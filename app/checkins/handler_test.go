@@ -1,0 +1,156 @@
+package checkins_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/checkins"
+	"github.com/RinTanth/go-backend/app/profile"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+type stubRepo struct {
+	exists       bool
+	recent       bool
+	createCalled bool
+	created      *checkins.CheckIn
+}
+
+func (s *stubRepo) PlaceExists(_ context.Context, _ string) (bool, error) {
+	return s.exists, nil
+}
+
+func (s *stubRepo) HasRecentCheckIn(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
+	return s.recent, nil
+}
+
+func (s *stubRepo) Create(_ context.Context, in checkins.CreateInput) (*checkins.CheckIn, error) {
+	s.createCalled = true
+	s.created = &checkins.CheckIn{
+		CheckInID:     "cccccccc-cccc-cccc-cccc-cccccccccccc",
+		PlaceID:       in.PlaceID,
+		UserID:        in.UserID,
+		Occupancy:     in.Occupancy,
+		Satisfied:     in.Satisfied,
+		PointsAwarded: checkins.TotalPointsAwarded,
+		PointsBreakdown: checkins.PointsBreakdown{
+			CheckIn:   checkins.PointsCheckIn,
+			Occupancy: checkins.PointsOccupancy,
+		},
+		CreditPoints: 100,
+		CreatedAt:    time.Now().UTC(),
+	}
+	return s.created, nil
+}
+
+type stubProfiles struct{}
+
+func (s *stubProfiles) GetByUserID(context.Context, string) (*profile.Profile, error) {
+	return nil, profile.ErrNotFound
+}
+func (s *stubProfiles) Ensure(_ context.Context, userID, _ string, _ profile.OAuthSeed) (*profile.Profile, error) {
+	return &profile.Profile{UserID: userID, DisplayName: "u", Username: "user"}, nil
+}
+func (s *stubProfiles) SyncFromOAuth(context.Context, string, string, profile.OAuthSeed) (*profile.Profile, error) {
+	return nil, profile.ErrNotFound
+}
+func (s *stubProfiles) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
+	return nil, profile.ErrNotFound
+}
+
+func performCreate(t *testing.T, repo *stubRepo, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	handler := checkins.NewHandler(checkins.HandlerConfig{Repo: repo, Profiles: &stubProfiles{}})
+	engine := gin.New()
+	engine.POST("/api/v1/places/:placeId/check-ins", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub:   "11111111-1111-1111-1111-111111111111",
+			Email: "a@example.com",
+		})
+		handler.Create(c)
+	})
+
+	payload, err := json.Marshal(body)
+	require.NoError(t, err)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/places/22222222-2222-2222-2222-222222222222/check-ins",
+		bytes.NewReader(payload),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	return w
+}
+
+func TestCreate_Success(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{exists: true}
+	satisfied := true
+	w := performCreate(t, repo, map[string]any{
+		"occupancy": "normal",
+		"satisfied": satisfied,
+	})
+	r.Equal(http.StatusCreated, w.Code)
+	r.True(repo.createCalled)
+}
+
+func TestCreate_RejectsCooldown(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{exists: true, recent: true}
+	satisfied := true
+	w := performCreate(t, repo, map[string]any{
+		"occupancy": "normal",
+		"satisfied": satisfied,
+	})
+	r.Equal(http.StatusConflict, w.Code)
+	r.False(repo.createCalled)
+}
+
+func TestCreate_RejectsMissingPlace(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{exists: false}
+	satisfied := true
+	w := performCreate(t, repo, map[string]any{
+		"occupancy": "normal",
+		"satisfied": satisfied,
+	})
+	r.Equal(http.StatusNotFound, w.Code)
+	r.False(repo.createCalled)
+}
+
+func TestCreate_RequiresEditWhenUnsatisfied(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{exists: true}
+	satisfied := false
+	w := performCreate(t, repo, map[string]any{
+		"occupancy": "full",
+		"satisfied": satisfied,
+	})
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.False(repo.createCalled)
+}
+
+func TestNormalizeCreateRequest(t *testing.T) {
+	r := require.New(t)
+	satisfied := false
+	suggestion := "incorrect_name"
+	in, err := checkins.NormalizeCreateRequest(checkins.CreateCheckInRequest{
+		Occupancy:      "Crowded",
+		Satisfied:      &satisfied,
+		EditSuggestion: &suggestion,
+	})
+	r.NoError(err)
+	r.Equal("crowded", in.Occupancy)
+	r.False(in.Satisfied)
+	r.Equal("incorrect_name", *in.EditSuggestion)
+}
