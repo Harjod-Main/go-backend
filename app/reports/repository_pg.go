@@ -110,3 +110,62 @@ func (r *postgresRepo) PlaceExists(ctx context.Context, placeID string) (bool, e
 	}
 	return exists, nil
 }
+
+const listIssueReportsByUserSQL = `
+SELECT
+  report_id::text,
+  user_id::text,
+  category,
+  description,
+  COALESCE(photo_urls, '{}'::text[]),
+  reporter_email,
+  status::text,
+  created_at
+FROM issue_reports
+WHERE user_id = $1::uuid
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+const countIssueReportsByUserSQL = `
+SELECT COUNT(*)::int
+FROM issue_reports
+WHERE user_id = $1::uuid
+`
+
+func (r *postgresRepo) ListIssueReportsByUser(ctx context.Context, userID string, limit, offset int) ([]IssueReport, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, countIssueReportsByUserSQL, userID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count issue reports: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, listIssueReportsByUserSQL, userID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list issue reports: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]IssueReport, 0, limit)
+	for rows.Next() {
+		var item IssueReport
+		var userIDVal *string
+		if err := rows.Scan(
+			&item.ReportID,
+			&userIDVal,
+			&item.Category,
+			&item.Description,
+			&item.PhotoURLs,
+			&item.ReporterEmail,
+			&item.Status,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan issue report: %w", err)
+		}
+		item.UserID = userIDVal
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate issue reports: %w", err)
+	}
+	return out, total, nil
+}

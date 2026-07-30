@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -71,4 +72,54 @@ func TestIPRateLimit_PerClientBehindTrustedProxy(t *testing.T) {
 	r.Equal(http.StatusTooManyRequests, do("203.0.113.1").Code)
 
 	r.Equal(http.StatusOK, do("203.0.113.2").Code)
+}
+
+func TestActorRateLimit_UsesAuthenticatedUserID(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{Sub: "user-1"})
+		c.Next()
+	})
+	engine.Use(middleware.ActorRateLimit(2, time.Minute))
+	engine.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	do := func(remoteAddr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		req.RemoteAddr = remoteAddr
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	r.Equal(http.StatusOK, do("203.0.113.10:12345").Code)
+	r.Equal(http.StatusOK, do("198.51.100.10:12345").Code)
+	r.Equal(http.StatusTooManyRequests, do("192.0.2.10:12345").Code)
+}
+
+func TestActorRateLimit_FallsBackToIPForAnonymous(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(middleware.ActorRateLimit(1, time.Minute))
+	engine.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	do := func(remoteAddr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		req.RemoteAddr = remoteAddr
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	r.Equal(http.StatusOK, do("203.0.113.10:12345").Code)
+	r.Equal(http.StatusTooManyRequests, do("203.0.113.10:56789").Code)
+	r.Equal(http.StatusOK, do("203.0.113.11:12345").Code)
 }

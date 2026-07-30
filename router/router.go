@@ -22,6 +22,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	writeRateLimitPerMinute = 15
+)
+
 // New constructs a gin.Engine with routes and middleware configured.
 func New(cfg config.Config, version, commit string, timeoutDuration time.Duration) (*gin.Engine, func(), error) {
 	r := gin.New()
@@ -59,14 +63,15 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	})
 	registerPlacesRoutes(r, placesHandler)
 
+	profileRepo := profile.NewPostgresRepo(pool)
+	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 	reviewsHandler := reviews.NewHandler(reviews.HandlerConfig{
-		Repo: reviews.NewPostgresRepo(pool),
+		Repo:     reviews.NewPostgresRepo(pool),
+		Profiles: profileRepo,
 	})
 	reportsHandler := reports.NewHandler(reports.HandlerConfig{
 		Repo: reports.NewPostgresRepo(pool),
 	})
-	profileRepo := profile.NewPostgresRepo(pool)
-	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 
 	verifier, err := supabaseauth.NewVerifier(
 		cfg.Supabase.ProjectURL,
@@ -115,7 +120,9 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 		placesGroup.GET("/:placeId/quote", placesHandler.GetQuote)
 	}
 
-	r.POST("/api/v1/quotes", placesHandler.CreateQuotes)
+	// Public batch quote reads can fan out into heavy DB work, so keep them on the
+	// same short per-IP limiter as other unauthenticated place lookups.
+	r.POST("/api/v1/quotes", localmw.IPRateLimit(60, time.Minute), placesHandler.CreateQuotes)
 
 	privilegesGroup := r.Group("/api/v1/privileges")
 	privilegesGroup.Use(localmw.IPRateLimit(60, time.Minute))
@@ -125,14 +132,35 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 }
 
 func registerReviewsRoutes(r *gin.Engine, reviewsHandler *reviews.Handler, verifier *supabaseauth.Verifier) {
-	r.GET("/api/v1/places/:placeId/reviews", reviewsHandler.ListByPlace)
-	r.POST("/api/v1/places/:placeId/reviews", supabaseauth.Middleware(verifier), reviewsHandler.Create)
+	r.GET("/api/v1/places/:placeId/reviews", localmw.IPRateLimit(60, time.Minute), reviewsHandler.ListByPlace)
+
+	reviewWrites := r.Group("/api/v1/places/:placeId/reviews")
+	reviewWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		reviewWrites.POST("", reviewsHandler.Create)
+	}
 }
 
 func registerReportsRoutes(r *gin.Engine, reportsHandler *reports.Handler, verifier *supabaseauth.Verifier) {
-	r.POST("/api/v1/reports", supabaseauth.OptionalMiddleware(verifier), reportsHandler.CreateIssueReport)
-	r.POST("/api/v1/reviews/:reviewId/reports", supabaseauth.Middleware(verifier), reportsHandler.CreateReviewReport)
-	r.POST("/api/v1/places/:placeId/feedback", supabaseauth.OptionalMiddleware(verifier), reportsHandler.CreatePlaceFeedback)
+	r.GET("/api/v1/me/reports", supabaseauth.Middleware(verifier), reportsHandler.ListMine)
+
+	reportsWrites := r.Group("/api/v1/reports")
+	reportsWrites.Use(supabaseauth.OptionalMiddleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		reportsWrites.POST("", reportsHandler.CreateIssueReport)
+	}
+
+	reviewReportWrites := r.Group("/api/v1/reviews/:reviewId/reports")
+	reviewReportWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		reviewReportWrites.POST("", reportsHandler.CreateReviewReport)
+	}
+
+	feedbackWrites := r.Group("/api/v1/places/:placeId/feedback")
+	feedbackWrites.Use(supabaseauth.OptionalMiddleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		feedbackWrites.POST("", reportsHandler.CreatePlaceFeedback)
+	}
 }
 
 func registerProfileRoutes(r *gin.Engine, profileHandler *profile.Handler, verifier *supabaseauth.Verifier) {
@@ -150,6 +178,7 @@ func registerSubmissionsRoutes(r *gin.Engine, submissionsHandler *submissions.Ha
 }
 
 func registerCheckInsRoutes(r *gin.Engine, checkinsHandler *checkins.Handler, verifier *supabaseauth.Verifier) {
+	r.GET("/api/v1/me/check-ins", supabaseauth.Middleware(verifier), checkinsHandler.ListMine)
 	r.POST("/api/v1/places/:placeId/check-ins", supabaseauth.Middleware(verifier), checkinsHandler.Create)
 }
 

@@ -59,3 +59,8 @@ type CreatePlaceFeedbackRequest struct {
 	OldValue       *string  `json:"oldValue"`
 	SuggestedValue *string  `json:"suggestedValue"`
 }
+
+type IssueReportListResponse struct {
+	Reports    []IssueReport `json:"reports"`
+	TotalCount int           `json:"totalCount"`
+}

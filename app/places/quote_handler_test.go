@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/RinTanth/go-backend/app/places"
+	localmw "github.com/RinTanth/go-backend/middleware"
 	"github.com/RinTanth/go-common/app"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -132,4 +135,63 @@ func TestCreateQuotes_RejectsExcessiveHours(t *testing.T) {
 
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.Equal(int32(0), repo.ratesCalls.Load())
+}
+
+func TestCreateQuotes_RejectsLargeBody(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{}
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.POST("/api/v1/quotes", handler.CreateQuotes)
+
+	body := `{"hours":1,"placeIds":["` + strings.Repeat("a", 20000) + `"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/quotes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.Equal(int32(0), repo.ratesCalls.Load())
+}
+
+func TestCreateQuotes_RateLimitedPerIP(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	repo := &stubRepo{rates: map[string]*places.PlaceRateDetail{
+		id: {
+			FreeMinutes: intPtr(0),
+			Currency:    sPtr("THB"),
+			RateTier: []places.PlaceRateTier{{
+				TierOrder: 1, FromHour: 0, ToHour: f64Ptr(24), Price: 40, Unit: "hourly",
+			}},
+		},
+	}}
+	engine := gin.New()
+	engine.POST("/api/v1/quotes", localmw.IPRateLimit(2, time.Minute), places.NewHandler(places.HandlerConfig{Repo: repo}).CreateQuotes)
+
+	payload, err := json.Marshal(map[string]any{
+		"hours":    2,
+		"placeIds": []string{id},
+	})
+	r.NoError(err)
+
+	do := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/quotes", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "203.0.113.10:12345"
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	r.Equal(http.StatusOK, do().Code)
+	r.Equal(http.StatusOK, do().Code)
+	blocked := do()
+	r.Equal(http.StatusTooManyRequests, blocked.Code)
+	r.NotEmpty(blocked.Header().Get("Retry-After"))
+	r.Equal(int32(2), repo.ratesCalls.Load())
 }

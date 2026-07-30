@@ -169,10 +169,11 @@ func TestMe_BackfillsExistingProfileFromOAuth(t *testing.T) {
 	avatar := "https://lh3.googleusercontent.com/a/example"
 	repo := &stubProfileRepo{
 		getProfile: &profile.Profile{
-			UserID:      "11111111-1111-1111-1111-111111111111",
-			DisplayName: "aif912752",
-			Username:    "aif912752",
-			AvatarURL:   &avatar,
+			UserID:       "11111111-1111-1111-1111-111111111111",
+			DisplayName:  "aif912752",
+			Username:     "aif912752",
+			AvatarURL:    &avatar,
+			CreditPoints: 1600,
 		},
 	}
 	handler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: repo})
@@ -207,4 +208,5 @@ func TestMe_BackfillsExistingProfileFromOAuth(t *testing.T) {
 	r.Equal("aif912752", body.Data.DisplayName)
 	r.NotNil(body.Data.AvatarURL)
 	r.Equal(avatar, *body.Data.AvatarURL)
+	r.Equal(1600, body.Data.CreditPoints)
 }

@@ -20,6 +20,7 @@ type quoteRequestBody struct {
 
 // maxQuoteHours caps stay duration on public quote endpoints (30 days).
 const maxQuoteHours = 720
+const maxCreateQuotesBodyBytes = 16 * 1024
 
 func isValidQuoteHours(hours float64) bool {
 	return hours >= 0 && hours <= maxQuoteHours && !math.IsNaN(hours) && !math.IsInf(hours, 0)
@@ -70,6 +71,8 @@ func (h *Handler) GetQuote(c *gin.Context) {
 // CreateQuotes returns price quotes for many places at once.
 // Rates are loaded in a single batch query (not N sequential round-trips).
 func (h *Handler) CreateQuotes(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCreateQuotesBodyBytes)
+
 	var body quoteRequestBody
 	if err := c.ShouldBindJSON(&body); err != nil || !isValidQuoteHours(body.Hours) || len(body.PlaceIDs) == 0 {
 		wrapper.Respond(c, wrapper.ResponseOption[[]Quote]{

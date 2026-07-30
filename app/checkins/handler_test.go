@@ -18,21 +18,22 @@ import (
 
 type stubRepo struct {
 	exists       bool
-	recent       bool
+	cooldown     bool
 	createCalled bool
 	created      *checkins.CheckIn
+	listItems    []checkins.CheckInActivity
+	listTotal    int
 }
 
 func (s *stubRepo) PlaceExists(_ context.Context, _ string) (bool, error) {
 	return s.exists, nil
 }
 
-func (s *stubRepo) HasRecentCheckIn(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
-	return s.recent, nil
-}
-
 func (s *stubRepo) Create(_ context.Context, in checkins.CreateInput) (*checkins.CheckIn, error) {
 	s.createCalled = true
+	if s.cooldown {
+		return nil, checkins.ErrCooldown
+	}
 	s.created = &checkins.CheckIn{
 		CheckInID:     "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		PlaceID:       in.PlaceID,
@@ -48,6 +49,10 @@ func (s *stubRepo) Create(_ context.Context, in checkins.CreateInput) (*checkins
 		CreatedAt:    time.Now().UTC(),
 	}
 	return s.created, nil
+}
+
+func (s *stubRepo) ListByUser(_ context.Context, _ string, _, _ int) ([]checkins.CheckInActivity, int, error) {
+	return s.listItems, s.listTotal, nil
 }
 
 type stubProfiles struct{}
@@ -106,14 +111,14 @@ func TestCreate_Success(t *testing.T) {
 
 func TestCreate_RejectsCooldown(t *testing.T) {
 	r := require.New(t)
-	repo := &stubRepo{exists: true, recent: true}
+	repo := &stubRepo{exists: true, cooldown: true}
 	satisfied := true
 	w := performCreate(t, repo, map[string]any{
 		"occupancy": "normal",
 		"satisfied": satisfied,
 	})
 	r.Equal(http.StatusConflict, w.Code)
-	r.False(repo.createCalled)
+	r.True(repo.createCalled)
 }
 
 func TestCreate_RejectsMissingPlace(t *testing.T) {
@@ -153,4 +158,44 @@ func TestNormalizeCreateRequest(t *testing.T) {
 	r.Equal("crowded", in.Occupancy)
 	r.False(in.Satisfied)
 	r.Equal("incorrect_name", *in.EditSuggestion)
+}
+
+func TestListMine_Success(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{
+		listItems: []checkins.CheckInActivity{{
+			CheckInID:     "cccccccc-cccc-cccc-cccc-cccccccccccc",
+			PlaceID:       "22222222-2222-2222-2222-222222222222",
+			PlaceNameTh:   "ลานจอดทดสอบ",
+			PlaceNameEn:   "Test Lot",
+			PointsAwarded: 100,
+			Occupancy:     "normal",
+			Satisfied:     true,
+			CreatedAt:     time.Date(2026, 7, 30, 7, 0, 0, 0, time.UTC),
+		}},
+		listTotal: 1,
+	}
+	handler := checkins.NewHandler(checkins.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.GET("/api/v1/me/check-ins", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.ListMine(c)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/check-ins?limit=10", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	var body struct {
+		Data checkins.CheckInListResponse `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal(1, body.Data.TotalCount)
+	r.Len(body.Data.CheckIns, 1)
+	r.Equal("Test Lot", body.Data.CheckIns[0].PlaceNameEn)
 }

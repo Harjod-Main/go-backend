@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -20,6 +21,23 @@ import (
 // Expired entries are evicted lazily during allow() (no background goroutine) so tests and
 // repeated handler construction do not leak goroutines.
 func IPRateLimit(limit int, window time.Duration) gin.HandlerFunc {
+	return rateLimit(limit, window, func(c *gin.Context) string {
+		return c.ClientIP()
+	})
+}
+
+// ActorRateLimit prefers authenticated user ID and falls back to client IP for
+// anonymous traffic, allowing separate user/IP throttling with one limiter.
+func ActorRateLimit(limit int, window time.Duration) gin.HandlerFunc {
+	return rateLimit(limit, window, func(c *gin.Context) string {
+		if claims, ok := supabaseauth.ClaimsFromGin(c); ok && claims.Sub != "" {
+			return "user:" + claims.Sub
+		}
+		return "ip:" + c.ClientIP()
+	})
+}
+
+func rateLimit(limit int, window time.Duration, keyFn func(*gin.Context) string) gin.HandlerFunc {
 	if limit <= 0 {
 		limit = 60
 	}
@@ -29,7 +47,10 @@ func IPRateLimit(limit int, window time.Duration) gin.HandlerFunc {
 
 	limiter := newIPLimiter(limit, window)
 	return func(c *gin.Context) {
-		key := c.ClientIP()
+		key := keyFn(c)
+		if key == "" {
+			key = c.ClientIP()
+		}
 		allowed, retryAfter := limiter.allow(key)
 		if allowed {
 			c.Next()

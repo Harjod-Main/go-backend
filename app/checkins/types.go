@@ -67,3 +67,20 @@ type CreateInput struct {
 	EditSuggestion *string
 	Comment        *string
 }
+
+// CheckInActivity is a user-facing check-in row for activity feeds.
+type CheckInActivity struct {
+	CheckInID     string    `json:"checkInId"`
+	PlaceID       string    `json:"placeId"`
+	PlaceNameTh   string    `json:"placeNameTh"`
+	PlaceNameEn   string    `json:"placeNameEn"`
+	PointsAwarded int       `json:"pointsAwarded"`
+	Occupancy     string    `json:"occupancy"`
+	Satisfied     bool      `json:"satisfied"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type CheckInListResponse struct {
+	CheckIns   []CheckInActivity `json:"checkIns"`
+	TotalCount int               `json:"totalCount"`
+}

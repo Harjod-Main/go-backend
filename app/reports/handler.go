@@ -3,6 +3,7 @@ package reports
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
@@ -11,6 +12,18 @@ import (
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+)
+
+const (
+	maxIssueReportBodyBytes   = 128 * 1024
+	maxReviewReportBodyBytes  = 64 * 1024
+	maxPlaceFeedbackBodyBytes = 128 * 1024
+
+	maxIssueDescriptionLen   = 4000
+	maxReviewReportDetailLen = 1000
+	maxPlaceFeedbackTextLen  = 4000
+	maxReporterEmailLen      = 254
+	maxFeedbackValueFieldLen = 500
 )
 
 var validIssueCategories = map[string]struct{}{
@@ -48,8 +61,57 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{repo: cfg.Repo}
 }
 
+// ListMine handles GET /api/v1/me/reports (auth required).
+func (h *Handler) ListMine(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[IssueReportListResponse]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	limit := 20
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	items, total, err := h.repo.ListIssueReportsByUser(c.Request.Context(), claims.Sub, limit, offset)
+	if err != nil {
+		slog.Error("list my issue reports failed", "user_id", claims.Sub, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[IssueReportListResponse]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if items == nil {
+		items = []IssueReport{}
+	}
+
+	resp := IssueReportListResponse{Reports: items, TotalCount: total}
+	wrapper.Respond(c, wrapper.ResponseOption[IssueReportListResponse]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data:       &resp,
+	})
+}
+
 // CreateIssueReport handles POST /api/v1/reports (auth optional).
 func (h *Handler) CreateIssueReport(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxIssueReportBodyBytes)
 	var body CreateIssueReportRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
@@ -70,7 +132,16 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		})
 		return
 	}
-	if len(description) > 4000 {
+	if len(description) > maxIssueDescriptionLen {
+		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	reporterEmail, ok := normalizeOptionalField(body.ReporterEmail, maxReporterEmailLen)
+	if !ok {
 		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
 			HTTPStatus: http.StatusBadRequest,
 			Code:       app.CodeBadRequest,
@@ -91,7 +162,7 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		Category:      category,
 		Description:   description,
 		PhotoURLs:     body.PhotoURLs,
-		ReporterEmail: body.ReporterEmail,
+		ReporterEmail: reporterEmail,
 	}
 	if claims, ok := supabaseauth.ClaimsFromGin(c); ok {
 		uid := claims.Sub
@@ -132,6 +203,7 @@ func (h *Handler) CreateReviewReport(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxReviewReportBodyBytes)
 	reviewID := strings.TrimSpace(c.Param("reviewId"))
 	if _, err := uuid.Parse(reviewID); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[ReviewReport]{
@@ -182,12 +254,14 @@ func (h *Handler) CreateReviewReport(c *gin.Context) {
 	}
 
 	uid := claims.Sub
-	var detail *string
-	if body.Detail != nil {
-		trimmed := strings.TrimSpace(*body.Detail)
-		if trimmed != "" {
-			detail = &trimmed
-		}
+	detail, ok := normalizeOptionalField(body.Detail, maxReviewReportDetailLen)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[ReviewReport]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
 	}
 
 	report := ReviewReport{
@@ -227,6 +301,7 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPlaceFeedbackBodyBytes)
 	var body CreatePlaceFeedbackRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
@@ -265,6 +340,42 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 		})
 		return
 	}
+	description, ok := normalizeOptionalField(body.Description, maxPlaceFeedbackTextLen)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	reporterEmail, ok := normalizeOptionalField(body.ReporterEmail, maxReporterEmailLen)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	oldValue, ok := normalizeOptionalField(body.OldValue, maxFeedbackValueFieldLen)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	suggestedValue, ok := normalizeOptionalField(body.SuggestedValue, maxFeedbackValueFieldLen)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
 	if len(body.PhotoURLs) > 5 || !mediaurl.ValidMediaURLs(body.PhotoURLs, mediaurl.MaxURLLen) {
 		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
 			HTTPStatus: http.StatusBadRequest,
@@ -292,12 +403,12 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 	feedback := PlaceFeedback{
 		PlaceID:        placeID,
 		FeedbackType:   feedbackType,
-		Description:    body.Description,
-		ReporterEmail:  body.ReporterEmail,
+		Description:    description,
+		ReporterEmail:  reporterEmail,
 		PhotoURL:       body.PhotoURL,
 		PhotoURLs:      body.PhotoURLs,
-		OldValue:       body.OldValue,
-		SuggestedValue: body.SuggestedValue,
+		OldValue:       oldValue,
+		SuggestedValue: suggestedValue,
 	}
 	if claims, ok := supabaseauth.ClaimsFromGin(c); ok {
 		uid := claims.Sub
@@ -324,4 +435,18 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 		Message:    app.MessageSuccess,
 		Data:       &feedback,
 	})
+}
+
+func normalizeOptionalField(value *string, maxLen int) (*string, bool) {
+	if value == nil {
+		return nil, true
+	}
+	trimmed := strings.TrimSpace(*value)
+	if len(trimmed) > maxLen {
+		return nil, false
+	}
+	if trimmed == "" {
+		return nil, true
+	}
+	return &trimmed, true
 }

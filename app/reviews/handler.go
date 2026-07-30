@@ -8,22 +8,30 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
+const (
+	maxReviewCreateBodyBytes = 128 * 1024
+	maxReviewDescriptionLen  = 4000
+)
+
 type HandlerConfig struct {
-	Repo Repository
+	Repo     Repository
+	Profiles profile.Repository
 }
 
 type Handler struct {
-	repo Repository
+	repo     Repository
+	profiles profile.Repository
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
-	return &Handler{repo: cfg.Repo}
+	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
 }
 
 // ListByPlace handles GET /api/v1/places/:placeId/reviews?limit=&offset=
@@ -94,6 +102,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxReviewCreateBodyBytes)
 	var body CreateReviewRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[Review]{
@@ -120,18 +129,30 @@ func (h *Handler) Create(c *gin.Context) {
 		})
 		return
 	}
-
-	displayName := claims.Email
-	if atIdx := strings.Index(displayName, "@"); atIdx > 0 {
-		displayName = displayName[:atIdx]
+	var description *string
+	if body.Description != nil {
+		trimmed := strings.TrimSpace(*body.Description)
+		if len(trimmed) > maxReviewDescriptionLen {
+			wrapper.Respond(c, wrapper.ResponseOption[Review]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
+		}
+		if trimmed != "" {
+			description = &trimmed
+		}
 	}
+
+	displayName := h.resolveDisplayName(c, claims)
 
 	review := Review{
 		PlaceID:     placeID,
 		UserID:      claims.Sub,
 		DisplayName: displayName,
 		Rating:      body.Rating,
-		Description: body.Description,
+		Description: description,
 		PhotoURLs:   body.PhotoURLs,
 	}
 
@@ -151,4 +172,31 @@ func (h *Handler) Create(c *gin.Context) {
 		Message:    app.MessageSuccess,
 		Data:       &review,
 	})
+}
+
+// resolveDisplayName prefers the user's profile display name, falling back to
+// the email local-part only if no profile repository is wired or the lookup
+// fails (matching the existing graceful-degradation pattern elsewhere).
+func (h *Handler) resolveDisplayName(c *gin.Context, claims *supabaseauth.Claims) string {
+	fallback := claims.Email
+	if atIdx := strings.Index(fallback, "@"); atIdx > 0 {
+		fallback = fallback[:atIdx]
+	}
+
+	if h.profiles == nil {
+		return fallback
+	}
+
+	seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+	p, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed)
+	if err != nil {
+		slog.Error("ensure profile before review failed", "user_id", claims.Sub, "error", err)
+		return fallback
+	}
+
+	displayName := strings.TrimSpace(p.DisplayName)
+	if displayName == "" {
+		return fallback
+	}
+	return displayName
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
@@ -26,6 +27,54 @@ type Handler struct {
 
 func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
+}
+
+// ListMine handles GET /api/v1/me/check-ins (auth required).
+func (h *Handler) ListMine(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[CheckInListResponse]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	limit := 20
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	items, total, err := h.repo.ListByUser(c.Request.Context(), claims.Sub, limit, offset)
+	if err != nil {
+		slog.Error("list my check-ins failed", "user_id", claims.Sub, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[CheckInListResponse]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if items == nil {
+		items = []CheckInActivity{}
+	}
+
+	resp := CheckInListResponse{CheckIns: items, TotalCount: total}
+	wrapper.Respond(c, wrapper.ResponseOption[CheckInListResponse]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data:       &resp,
+	})
 }
 
 // Create handles POST /api/v1/places/:placeId/check-ins (auth required).
@@ -87,25 +136,6 @@ func (h *Handler) Create(c *gin.Context) {
 			HTTPStatus: http.StatusNotFound,
 			Code:       app.CodeNotFound,
 			Message:    app.MessageNotFound,
-		})
-		return
-	}
-
-	recent, err := h.repo.HasRecentCheckIn(c.Request.Context(), claims.Sub, placeID, Cooldown)
-	if err != nil {
-		slog.Error("check-in cooldown check failed", "place_id", placeID, "user_id", claims.Sub, "error", err)
-		wrapper.Respond(c, wrapper.ResponseOption[CheckIn]{
-			HTTPStatus: http.StatusInternalServerError,
-			Code:       app.CodeInternalError,
-			Message:    app.MessageInternalError,
-		})
-		return
-	}
-	if recent {
-		wrapper.Respond(c, wrapper.ResponseOption[CheckIn]{
-			HTTPStatus: http.StatusConflict,
-			Code:       app.CodeBadRequest,
-			Message:    "check-in cooldown active for this place",
 		})
 		return
 	}

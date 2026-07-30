@@ -12,12 +12,13 @@ import (
 )
 
 type MeResponse struct {
-	UserID      string  `json:"userId"`
-	Email       string  `json:"email,omitempty"`
-	Role        string  `json:"role,omitempty"`
-	DisplayName string  `json:"displayName,omitempty"`
-	Username    string  `json:"username,omitempty"`
-	AvatarURL   *string `json:"avatarUrl,omitempty"`
+	UserID       string  `json:"userId"`
+	Email        string  `json:"email,omitempty"`
+	Role         string  `json:"role,omitempty"`
+	DisplayName  string  `json:"displayName,omitempty"`
+	Username     string  `json:"username,omitempty"`
+	AvatarURL    *string `json:"avatarUrl,omitempty"`
+	CreditPoints int     `json:"creditPoints"`
 }
 
 // Me returns the authenticated Supabase user plus profile fields.
@@ -49,6 +50,7 @@ func (h *Handler) Me(c *gin.Context) {
 			resp.DisplayName = p.DisplayName
 			resp.Username = p.Username
 			resp.AvatarURL = p.AvatarURL
+			resp.CreditPoints = p.CreditPoints
 		}
 	}
 

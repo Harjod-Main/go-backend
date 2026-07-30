@@ -27,7 +27,7 @@ func NewPostgresRepo(pool *pgxpool.Pool) Repository {
 }
 
 const getByUserIDSQL = `
-SELECT user_id::text, display_name, username, avatar_url, created_at, updated_at
+SELECT user_id::text, display_name, username, avatar_url, credit_points, created_at, updated_at
 FROM profiles
 WHERE user_id = $1::uuid
 `
@@ -35,7 +35,7 @@ WHERE user_id = $1::uuid
 func (r *postgresRepo) GetByUserID(ctx context.Context, userID string) (*Profile, error) {
 	var p Profile
 	err := r.pool.QueryRow(ctx, getByUserIDSQL, userID).Scan(
-		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
+		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreditPoints, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -50,7 +50,7 @@ const ensureProfileSQL = `
 INSERT INTO profiles (user_id, display_name, username, avatar_url, created_at, updated_at)
 VALUES ($1::uuid, $2, $3, $4, $5, $5)
 ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
+RETURNING user_id::text, display_name, username, avatar_url, credit_points, created_at, updated_at
 `
 
 func (r *postgresRepo) Ensure(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error) {
@@ -83,7 +83,7 @@ func (r *postgresRepo) Ensure(ctx context.Context, userID, email string, seed OA
 
 		var p Profile
 		err := r.pool.QueryRow(ctx, ensureProfileSQL, userID, display, username, seed.AvatarURL, now).Scan(
-			&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
+			&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreditPoints, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err == nil {
 			return &p, nil
@@ -107,7 +107,7 @@ SET
 	avatar_url = COALESCE($3, avatar_url),
 	updated_at = $4
 WHERE user_id = $1::uuid
-RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
+RETURNING user_id::text, display_name, username, avatar_url, credit_points, created_at, updated_at
 `
 
 func (r *postgresRepo) SyncFromOAuth(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error) {
@@ -139,7 +139,7 @@ func (r *postgresRepo) maybeBackfillOAuth(ctx context.Context, userID string, em
 	now := time.Now()
 	var p Profile
 	err := r.pool.QueryRow(ctx, backfillOAuthSQL, userID, displayPtr, avatarPtr, now).Scan(
-		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
+		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreditPoints, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		slog.Error("oauth backfill update failed", "user_id", userID, "error", err)
@@ -160,7 +160,7 @@ SET
 	END,
 	updated_at = $6
 WHERE user_id = $1::uuid
-RETURNING user_id::text, display_name, username, avatar_url, created_at, updated_at
+RETURNING user_id::text, display_name, username, avatar_url, credit_points, created_at, updated_at
 `
 
 func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, username *string, avatarURL *string, clearAvatar bool) (*Profile, error) {
@@ -193,7 +193,7 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 	now := time.Now()
 	var p Profile
 	err := r.pool.QueryRow(ctx, updateProfileSQL, userID, displayName, username, avatarURL, clearAvatar, now).Scan(
-		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreatedAt, &p.UpdatedAt,
+		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreditPoints, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

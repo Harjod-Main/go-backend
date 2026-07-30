@@ -28,22 +28,6 @@ func (r *postgresRepo) PlaceExists(ctx context.Context, placeID string) (bool, e
 	return exists, nil
 }
 
-func (r *postgresRepo) HasRecentCheckIn(ctx context.Context, userID, placeID string, within time.Duration) (bool, error) {
-	var exists bool
-	since := time.Now().UTC().Add(-within)
-	err := r.pool.QueryRow(ctx, `
-SELECT EXISTS(
-  SELECT 1 FROM check_ins
-  WHERE user_id = $1::uuid
-    AND place_id = $2::uuid
-    AND created_at > $3
-)`, userID, placeID, since).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("check recent check-in: %w", err)
-	}
-	return exists, nil
-}
-
 const insertCheckInSQL = `
 INSERT INTO check_ins (
   place_id, user_id, occupancy, satisfied, edit_suggestion, comment, points_awarded, created_at
@@ -61,6 +45,15 @@ WHERE user_id = $1::uuid
 RETURNING credit_points
 `
 
+const recentCheckInSQL = `
+SELECT EXISTS(
+  SELECT 1 FROM check_ins
+  WHERE user_id = $1::uuid
+    AND place_id = $2::uuid
+    AND created_at > $3
+)
+`
+
 func (r *postgresRepo) Create(ctx context.Context, in CreateInput) (*CheckIn, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -68,7 +61,24 @@ func (r *postgresRepo) Create(ctx context.Context, in CreateInput) (*CheckIn, er
 	}
 	defer tx.Rollback(ctx)
 
+	// Serialize concurrent check-ins for the same user+place so cooldown cannot
+	// be bypassed by racing check-then-insert requests.
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))`,
+		in.UserID, in.PlaceID,
+	); err != nil {
+		return nil, fmt.Errorf("advisory lock check-in: %w", err)
+	}
+
 	now := time.Now().UTC()
+	var recent bool
+	if err := tx.QueryRow(ctx, recentCheckInSQL, in.UserID, in.PlaceID, now.Add(-Cooldown)).Scan(&recent); err != nil {
+		return nil, fmt.Errorf("check recent check-in: %w", err)
+	}
+	if recent {
+		return nil, ErrCooldown
+	}
+
 	out := &CheckIn{
 		PlaceID:   in.PlaceID,
 		UserID:    in.UserID,
@@ -110,6 +120,64 @@ func (r *postgresRepo) Create(ctx context.Context, in CreateInput) (*CheckIn, er
 		return nil, fmt.Errorf("commit check-in: %w", err)
 	}
 	return out, nil
+}
+
+const listByUserSQL = `
+SELECT
+  ci.check_in_id::text,
+  ci.place_id::text,
+  COALESCE(pl.name_th, ''),
+  COALESCE(pl.name_en, ''),
+  ci.points_awarded,
+  ci.occupancy,
+  ci.satisfied,
+  ci.created_at
+FROM check_ins ci
+LEFT JOIN places pl ON pl.place_id = ci.place_id
+WHERE ci.user_id = $1::uuid
+ORDER BY ci.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+const countByUserSQL = `
+SELECT COUNT(*)::int
+FROM check_ins
+WHERE user_id = $1::uuid
+`
+
+func (r *postgresRepo) ListByUser(ctx context.Context, userID string, limit, offset int) ([]CheckInActivity, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, countByUserSQL, userID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count user check-ins: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, listByUserSQL, userID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list user check-ins: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]CheckInActivity, 0, limit)
+	for rows.Next() {
+		var item CheckInActivity
+		if err := rows.Scan(
+			&item.CheckInID,
+			&item.PlaceID,
+			&item.PlaceNameTh,
+			&item.PlaceNameEn,
+			&item.PointsAwarded,
+			&item.Occupancy,
+			&item.Satisfied,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan user check-in: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate user check-ins: %w", err)
+	}
+	return out, total, nil
 }
 
 func NormalizeCreateRequest(body CreateCheckInRequest) (CreateInput, error) {
