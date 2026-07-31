@@ -62,5 +62,6 @@ type CreatePlaceFeedbackRequest struct {
 
 type IssueReportListResponse struct {
 	Reports    []IssueReport `json:"reports"`
-	TotalCount int           `json:"totalCount"`
+	NextCursor *string       `json:"nextCursor,omitempty"`
+	HasMore    bool          `json:"hasMore"`
 }

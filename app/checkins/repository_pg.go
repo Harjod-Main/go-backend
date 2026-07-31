@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -135,25 +136,25 @@ SELECT
 FROM check_ins ci
 LEFT JOIN places pl ON pl.place_id = ci.place_id
 WHERE ci.user_id = $1::uuid
-ORDER BY ci.created_at DESC
-LIMIT $2 OFFSET $3
+  AND (
+    $2::timestamptz IS NULL
+    OR (ci.created_at, ci.check_in_id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY ci.created_at DESC, ci.check_in_id DESC
+LIMIT $4
 `
 
-const countByUserSQL = `
-SELECT COUNT(*)::int
-FROM check_ins
-WHERE user_id = $1::uuid
-`
-
-func (r *postgresRepo) ListByUser(ctx context.Context, userID string, limit, offset int) ([]CheckInActivity, int, error) {
-	var total int
-	if err := r.pool.QueryRow(ctx, countByUserSQL, userID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count user check-ins: %w", err)
+func (r *postgresRepo) ListByUser(ctx context.Context, userID string, limit int, cursor *pagination.Cursor) ([]CheckInActivity, *string, error) {
+	var cursorAt any
+	var cursorID any
+	if cursor != nil {
+		cursorAt = cursor.CreatedAt
+		cursorID = cursor.ID
 	}
 
-	rows, err := r.pool.Query(ctx, listByUserSQL, userID, limit, offset)
+	rows, err := r.pool.Query(ctx, listByUserSQL, userID, cursorAt, cursorID, limit+1)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list user check-ins: %w", err)
+		return nil, nil, fmt.Errorf("list user check-ins: %w", err)
 	}
 	defer rows.Close()
 
@@ -170,14 +171,24 @@ func (r *postgresRepo) ListByUser(ctx context.Context, userID string, limit, off
 			&item.Satisfied,
 			&item.CreatedAt,
 		); err != nil {
-			return nil, 0, fmt.Errorf("scan user check-in: %w", err)
+			return nil, nil, fmt.Errorf("scan user check-in: %w", err)
 		}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate user check-ins: %w", err)
+		return nil, nil, fmt.Errorf("iterate user check-ins: %w", err)
 	}
-	return out, total, nil
+
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	var nextCursor *string
+	if hasMore && len(out) > 0 {
+		last := out[len(out)-1]
+		nextCursor = pagination.NextFromLast(true, last.CreatedAt, last.CheckInID)
+	}
+	return out, nextCursor, nil
 }
 
 func NormalizeCreateRequest(body CreateCheckInRequest) (CreateInput, error) {

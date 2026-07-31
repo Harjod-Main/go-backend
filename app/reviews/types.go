@@ -24,7 +24,8 @@ type Review struct {
 // ReviewListResponse is the API response for listing reviews.
 type ReviewListResponse struct {
 	Reviews    []Review `json:"reviews"`
-	TotalCount int      `json:"total_count"`
+	NextCursor *string  `json:"next_cursor,omitempty"`
+	HasMore    bool     `json:"has_more"`
 }
 
 // CreateReviewRequest is the POST body for creating a review.

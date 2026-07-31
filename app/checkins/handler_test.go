@@ -11,6 +11,7 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/checkins"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,6 @@ type stubRepo struct {
 	createCalled bool
 	created      *checkins.CheckIn
 	listItems    []checkins.CheckInActivity
-	listTotal    int
 }
 
 func (s *stubRepo) PlaceExists(_ context.Context, _ string) (bool, error) {
@@ -51,8 +51,8 @@ func (s *stubRepo) Create(_ context.Context, in checkins.CreateInput) (*checkins
 	return s.created, nil
 }
 
-func (s *stubRepo) ListByUser(_ context.Context, _ string, _, _ int) ([]checkins.CheckInActivity, int, error) {
-	return s.listItems, s.listTotal, nil
+func (s *stubRepo) ListByUser(_ context.Context, _ string, _ int, _ *pagination.Cursor) ([]checkins.CheckInActivity, *string, error) {
+	return s.listItems, nil, nil
 }
 
 type stubProfiles struct{}
@@ -175,7 +175,6 @@ func TestListMine_Success(t *testing.T) {
 			Satisfied:     true,
 			CreatedAt:     time.Date(2026, 7, 30, 7, 0, 0, 0, time.UTC),
 		}},
-		listTotal: 1,
 	}
 	handler := checkins.NewHandler(checkins.HandlerConfig{Repo: repo})
 	engine := gin.New()
@@ -195,7 +194,8 @@ func TestListMine_Success(t *testing.T) {
 		Data checkins.CheckInListResponse `json:"data"`
 	}
 	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
-	r.Equal(1, body.Data.TotalCount)
+	r.False(body.Data.HasMore)
+	r.Nil(body.Data.NextCursor)
 	r.Len(body.Data.CheckIns, 1)
 	r.Equal("Test Lot", body.Data.CheckIns[0].PlaceNameEn)
 }

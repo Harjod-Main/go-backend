@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,21 +31,25 @@ SELECT
 	created_at
 FROM reviews
 WHERE place_id = $1::uuid
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3
+  AND (
+    $2::timestamptz IS NULL
+    OR (created_at, review_id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY created_at DESC, review_id DESC
+LIMIT $4
 `
 
-const countByPlaceSQL = `SELECT count(*) FROM reviews WHERE place_id = $1::uuid`
-
-func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit int, offset int) ([]Review, int, error) {
-	var total int
-	if err := r.pool.QueryRow(ctx, countByPlaceSQL, placeID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count reviews: %w", err)
+func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit int, cursor *pagination.Cursor) ([]Review, *string, error) {
+	var cursorAt any
+	var cursorID any
+	if cursor != nil {
+		cursorAt = cursor.CreatedAt
+		cursorID = cursor.ID
 	}
 
-	rows, err := r.pool.Query(ctx, listByPlaceSQL, placeID, limit, offset)
+	rows, err := r.pool.Query(ctx, listByPlaceSQL, placeID, cursorAt, cursorID, limit+1)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list reviews: %w", err)
+		return nil, nil, fmt.Errorf("list reviews: %w", err)
 	}
 	defer rows.Close()
 
@@ -62,15 +67,28 @@ func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit in
 			&photoURLs,
 			&rv.CreatedAt,
 		); err != nil {
-			return nil, 0, fmt.Errorf("scan review: %w", err)
+			return nil, nil, fmt.Errorf("scan review: %w", err)
 		}
 		rv.PhotoURLs = photoURLs
 		reviews = append(reviews, rv)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate reviews: %w", err)
+	}
 	if reviews == nil {
 		reviews = []Review{}
 	}
-	return reviews, total, nil
+
+	hasMore := len(reviews) > limit
+	if hasMore {
+		reviews = reviews[:limit]
+	}
+	var nextCursor *string
+	if hasMore && len(reviews) > 0 {
+		last := reviews[len(reviews)-1]
+		nextCursor = pagination.NextFromLast(true, last.CreatedAt, last.ReviewID)
+	}
+	return reviews, nextCursor, nil
 }
 
 const insertReviewSQL = `

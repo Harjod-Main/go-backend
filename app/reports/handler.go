@@ -3,11 +3,11 @@ package reports
 import (
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -73,20 +73,23 @@ func (h *Handler) ListMine(c *gin.Context) {
 		return
 	}
 
-	limit := 20
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-			limit = n
+	limit := pagination.ParseLimit(c.Query("limit"), 20, 100)
+
+	var cursor *pagination.Cursor
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		decoded, err := pagination.Decode(raw)
+		if err != nil {
+			wrapper.Respond(c, wrapper.ResponseOption[IssueReportListResponse]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
 		}
-	}
-	offset := 0
-	if v := c.Query("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
+		cursor = &decoded
 	}
 
-	items, total, err := h.repo.ListIssueReportsByUser(c.Request.Context(), claims.Sub, limit, offset)
+	items, nextCursor, err := h.repo.ListIssueReportsByUser(c.Request.Context(), claims.Sub, limit, cursor)
 	if err != nil {
 		slog.Error("list my issue reports failed", "user_id", claims.Sub, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[IssueReportListResponse]{
@@ -100,7 +103,11 @@ func (h *Handler) ListMine(c *gin.Context) {
 		items = []IssueReport{}
 	}
 
-	resp := IssueReportListResponse{Reports: items, TotalCount: total}
+	resp := IssueReportListResponse{
+		Reports:    items,
+		NextCursor: nextCursor,
+		HasMore:    nextCursor != nil,
+	}
 	wrapper.Respond(c, wrapper.ResponseOption[IssueReportListResponse]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
@@ -149,15 +156,29 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		})
 		return
 	}
+
+	claims, authenticated := supabaseauth.ClaimsFromGin(c)
+
 	// Issue report photos live in a private bucket, so the client submits object
-	// paths instead of public URLs.
-	if len(body.PhotoURLs) > 5 || !mediaurl.ValidPrivateReportPaths(body.PhotoURLs, mediaurl.MaxURLLen) {
-		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
-		return
+	// paths instead of public URLs. Uploads are user-scoped; require auth and
+	// reject paths outside "{userID}/reports/".
+	if len(body.PhotoURLs) > 0 {
+		if !authenticated {
+			wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
+				HTTPStatus: http.StatusUnauthorized,
+				Code:       app.CodeUnauthorized,
+				Message:    app.MessageUnauthorized,
+			})
+			return
+		}
+		if len(body.PhotoURLs) > 5 || !mediaurl.ValidOwnedPrivateReportPaths(body.PhotoURLs, claims.Sub, mediaurl.MaxURLLen) {
+			wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
+		}
 	}
 
 	report := IssueReport{
@@ -166,7 +187,7 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		PhotoURLs:     body.PhotoURLs,
 		ReporterEmail: reporterEmail,
 	}
-	if claims, ok := supabaseauth.ClaimsFromGin(c); ok {
+	if authenticated {
 		uid := claims.Sub
 		report.UserID = &uid
 		if report.ReporterEmail == nil && claims.Email != "" {

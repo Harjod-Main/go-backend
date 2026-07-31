@@ -4,11 +4,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -35,7 +35,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
 }
 
-// ListByPlace handles GET /api/v1/places/:placeId/reviews?limit=&offset=
+// ListByPlace handles GET /api/v1/places/:placeId/reviews?limit=&cursor=
 func (h *Handler) ListByPlace(c *gin.Context) {
 	placeID := strings.TrimSpace(c.Param("placeId"))
 	if _, err := uuid.Parse(placeID); err != nil {
@@ -47,21 +47,23 @@ func (h *Handler) ListByPlace(c *gin.Context) {
 		return
 	}
 
-	limit := 20
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-			limit = n
+	limit := pagination.ParseLimit(c.Query("limit"), 20, 100)
+
+	var cursor *pagination.Cursor
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		decoded, err := pagination.Decode(raw)
+		if err != nil {
+			wrapper.Respond(c, wrapper.ResponseOption[ReviewListResponse]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
 		}
+		cursor = &decoded
 	}
 
-	offset := 0
-	if v := c.Query("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
-
-	reviews, total, err := h.repo.ListByPlace(c.Request.Context(), placeID, limit, offset)
+	reviews, nextCursor, err := h.repo.ListByPlace(c.Request.Context(), placeID, limit, cursor)
 	if err != nil {
 		slog.Error("list reviews failed", "place_id", placeID, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[ReviewListResponse]{
@@ -72,7 +74,11 @@ func (h *Handler) ListByPlace(c *gin.Context) {
 		return
 	}
 
-	resp := ReviewListResponse{Reviews: reviews, TotalCount: total}
+	resp := ReviewListResponse{
+		Reviews:    reviews,
+		NextCursor: nextCursor,
+		HasMore:    nextCursor != nil,
+	}
 	wrapper.Respond(c, wrapper.ResponseOption[ReviewListResponse]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,

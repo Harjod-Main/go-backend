@@ -12,6 +12,7 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/reports"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -80,8 +81,8 @@ func (s *stubRepo) CreatePlaceFeedback(_ context.Context, feedback *reports.Plac
 	return nil
 }
 
-func (s *stubRepo) ListIssueReportsByUser(_ context.Context, _ string, _, _ int) ([]reports.IssueReport, int, error) {
-	return nil, 0, nil
+func (s *stubRepo) ListIssueReportsByUser(_ context.Context, _ string, _ int, _ *pagination.Cursor) ([]reports.IssueReport, *string, error) {
+	return nil, nil, nil
 }
 
 func (s *stubRepo) ReviewExists(_ context.Context, _ string) (bool, error) {
@@ -247,7 +248,7 @@ func TestCreateIssueReport_RejectsTooManyPhotoURLs(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createIssueCalled)
 }
@@ -265,6 +266,34 @@ func TestCreateIssueReport_AcceptsPrivateReportPaths(t *testing.T) {
 	r.Equal(http.StatusCreated, w.Code)
 	r.True(repo.createIssueCalled)
 	r.Equal([]string{testReportPath}, repo.createdIssue.PhotoURLs)
+}
+
+func TestCreateIssueReport_RejectsPhotosWithoutAuth(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+
+	body := validIssueReportBody()
+	body["photoUrls"] = []string{testReportPath}
+	payload, err := json.Marshal(body)
+	r.NoError(err)
+
+	w := performCreateIssueReport(t, repo, payload, false)
+	r.Equal(http.StatusUnauthorized, w.Code)
+	r.False(repo.createIssueCalled)
+}
+
+func TestCreateIssueReport_RejectsOtherUserPrivatePath(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+
+	body := validIssueReportBody()
+	body["photoUrls"] = []string{"22222222-2222-2222-2222-222222222222/reports/private.jpg"}
+	payload, err := json.Marshal(body)
+	r.NoError(err)
+
+	w := performCreateIssueReport(t, repo, payload, true)
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.False(repo.createIssueCalled)
 }
 
 func TestCreateIssueReport_RejectsPublicPhotoURLs(t *testing.T) {

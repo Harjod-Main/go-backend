@@ -4,10 +4,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -41,20 +41,23 @@ func (h *Handler) ListMine(c *gin.Context) {
 		return
 	}
 
-	limit := 20
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-			limit = n
+	limit := pagination.ParseLimit(c.Query("limit"), 20, 100)
+
+	var cursor *pagination.Cursor
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		decoded, err := pagination.Decode(raw)
+		if err != nil {
+			wrapper.Respond(c, wrapper.ResponseOption[CheckInListResponse]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
 		}
-	}
-	offset := 0
-	if v := c.Query("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
+		cursor = &decoded
 	}
 
-	items, total, err := h.repo.ListByUser(c.Request.Context(), claims.Sub, limit, offset)
+	items, nextCursor, err := h.repo.ListByUser(c.Request.Context(), claims.Sub, limit, cursor)
 	if err != nil {
 		slog.Error("list my check-ins failed", "user_id", claims.Sub, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[CheckInListResponse]{
@@ -68,7 +71,11 @@ func (h *Handler) ListMine(c *gin.Context) {
 		items = []CheckInActivity{}
 	}
 
-	resp := CheckInListResponse{CheckIns: items, TotalCount: total}
+	resp := CheckInListResponse{
+		CheckIns:   items,
+		NextCursor: nextCursor,
+		HasMore:    nextCursor != nil,
+	}
 	wrapper.Respond(c, wrapper.ResponseOption[CheckInListResponse]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,

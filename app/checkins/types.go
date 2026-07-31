@@ -82,5 +82,6 @@ type CheckInActivity struct {
 
 type CheckInListResponse struct {
 	CheckIns   []CheckInActivity `json:"checkIns"`
-	TotalCount int               `json:"totalCount"`
+	NextCursor *string           `json:"nextCursor,omitempty"`
+	HasMore    bool              `json:"hasMore"`
 }

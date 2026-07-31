@@ -9,9 +9,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-backend/app/reviews"
 	"github.com/gin-gonic/gin"
@@ -36,16 +38,20 @@ type stubRepo struct {
 	updated      *reviews.Review
 	updateErr    error
 
-	listItems []reviews.Review
-	listTotal int
-	listErr   error
+	listItems      []reviews.Review
+	listNextCursor *string
+	listErr        error
+	listLimit      int
+	listCursor     *pagination.Cursor
 }
 
-func (s *stubRepo) ListByPlace(_ context.Context, _ string, _ int, _ int) ([]reviews.Review, int, error) {
+func (s *stubRepo) ListByPlace(_ context.Context, _ string, limit int, cursor *pagination.Cursor) ([]reviews.Review, *string, error) {
+	s.listLimit = limit
+	s.listCursor = cursor
 	if s.listErr != nil {
-		return nil, 0, s.listErr
+		return nil, nil, s.listErr
 	}
-	return s.listItems, s.listTotal, nil
+	return s.listItems, s.listNextCursor, nil
 }
 
 func (s *stubRepo) Create(_ context.Context, review *reviews.Review) error {
@@ -362,7 +368,6 @@ func TestListByPlace_Success(t *testing.T) {
 			DisplayName: "jane.doe",
 			Rating:      5,
 		}},
-		listTotal: 1,
 	}
 
 	w := performList(t, repo, testPlaceID, "")
@@ -372,8 +377,11 @@ func TestListByPlace_Success(t *testing.T) {
 		Data reviews.ReviewListResponse `json:"data"`
 	}
 	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
-	r.Equal(1, body.Data.TotalCount)
+	r.False(body.Data.HasMore)
+	r.Nil(body.Data.NextCursor)
 	r.Len(body.Data.Reviews, 1)
+	r.Equal(20, repo.listLimit)
+	r.Nil(repo.listCursor)
 }
 
 func TestListByPlace_RejectsInvalidPlaceID(t *testing.T) {
@@ -386,10 +394,43 @@ func TestListByPlace_RejectsInvalidPlaceID(t *testing.T) {
 
 func TestListByPlace_IgnoresOutOfRangeLimit(t *testing.T) {
 	r := require.New(t)
-	repo := &stubRepo{listItems: []reviews.Review{}, listTotal: 0}
+	repo := &stubRepo{listItems: []reviews.Review{}}
 
-	w := performList(t, repo, testPlaceID, "?limit=0&offset=-5")
+	w := performList(t, repo, testPlaceID, "?limit=0")
 	r.Equal(http.StatusOK, w.Code)
+	r.Equal(20, repo.listLimit)
+}
+
+func TestListByPlace_RejectsInvalidCursor(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+
+	w := performList(t, repo, testPlaceID, "?cursor=not-a-cursor")
+	r.Equal(http.StatusBadRequest, w.Code)
+}
+
+func TestListByPlace_AcceptsCursor(t *testing.T) {
+	r := require.New(t)
+	createdAt := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	token := pagination.Encode(createdAt, "cccccccc-cccc-cccc-cccc-cccccccccccc")
+	next := "next-token"
+	repo := &stubRepo{
+		listItems:      []reviews.Review{},
+		listNextCursor: &next,
+	}
+
+	w := performList(t, repo, testPlaceID, "?limit=5&cursor="+token)
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal(5, repo.listLimit)
+	r.NotNil(repo.listCursor)
+	r.Equal("cccccccc-cccc-cccc-cccc-cccccccccccc", repo.listCursor.ID)
+
+	var body struct {
+		Data reviews.ReviewListResponse `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.True(body.Data.HasMore)
+	r.Equal(&next, body.Data.NextCursor)
 }
 
 func TestListByPlace_RepositoryErrorReturns500(t *testing.T) {

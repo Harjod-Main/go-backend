@@ -107,12 +107,39 @@ func ValidAvatarValue(value string) bool {
 // ValidPrivateReportPaths returns true when every item is a safe object path under
 // the private reports bucket. Paths are stored server-side and later exchanged for
 // short-lived signed read URLs; raw public URLs are intentionally rejected.
+// Prefer ValidOwnedPrivateReportPaths when attaching paths to an authenticated user.
 func ValidPrivateReportPaths(paths []string, maxLen int) bool {
 	if maxLen <= 0 {
 		maxLen = MaxURLLen
 	}
 	for _, item := range paths {
 		if !validOnePrivateReportPath(strings.TrimSpace(item), maxLen) {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidOwnedPrivateReportPaths is like ValidPrivateReportPaths but also requires
+// every path to start with "{userID}/reports/".
+func ValidOwnedPrivateReportPaths(paths []string, userID string, maxLen int) bool {
+	if len(paths) == 0 {
+		return true
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" || strings.ContainsAny(userID, `/\?#`) {
+		return false
+	}
+	ownedPrefix := userID + "/" + privateReportsFolder + "/"
+	if maxLen <= 0 {
+		maxLen = MaxURLLen
+	}
+	for _, item := range paths {
+		trimmed := strings.TrimSpace(item)
+		if !validOnePrivateReportPath(trimmed, maxLen) {
+			return false
+		}
+		if !strings.HasPrefix(trimmed, ownedPrefix) {
 			return false
 		}
 	}

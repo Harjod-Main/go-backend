@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -123,25 +124,25 @@ SELECT
   created_at
 FROM issue_reports
 WHERE user_id = $1::uuid
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3
+  AND (
+    $2::timestamptz IS NULL
+    OR (created_at, report_id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY created_at DESC, report_id DESC
+LIMIT $4
 `
 
-const countIssueReportsByUserSQL = `
-SELECT COUNT(*)::int
-FROM issue_reports
-WHERE user_id = $1::uuid
-`
-
-func (r *postgresRepo) ListIssueReportsByUser(ctx context.Context, userID string, limit, offset int) ([]IssueReport, int, error) {
-	var total int
-	if err := r.pool.QueryRow(ctx, countIssueReportsByUserSQL, userID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count issue reports: %w", err)
+func (r *postgresRepo) ListIssueReportsByUser(ctx context.Context, userID string, limit int, cursor *pagination.Cursor) ([]IssueReport, *string, error) {
+	var cursorAt any
+	var cursorID any
+	if cursor != nil {
+		cursorAt = cursor.CreatedAt
+		cursorID = cursor.ID
 	}
 
-	rows, err := r.pool.Query(ctx, listIssueReportsByUserSQL, userID, limit, offset)
+	rows, err := r.pool.Query(ctx, listIssueReportsByUserSQL, userID, cursorAt, cursorID, limit+1)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list issue reports: %w", err)
+		return nil, nil, fmt.Errorf("list issue reports: %w", err)
 	}
 	defer rows.Close()
 
@@ -159,13 +160,23 @@ func (r *postgresRepo) ListIssueReportsByUser(ctx context.Context, userID string
 			&item.Status,
 			&item.CreatedAt,
 		); err != nil {
-			return nil, 0, fmt.Errorf("scan issue report: %w", err)
+			return nil, nil, fmt.Errorf("scan issue report: %w", err)
 		}
 		item.UserID = userIDVal
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate issue reports: %w", err)
+		return nil, nil, fmt.Errorf("iterate issue reports: %w", err)
 	}
-	return out, total, nil
+
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	var nextCursor *string
+	if hasMore && len(out) > 0 {
+		last := out[len(out)-1]
+		nextCursor = pagination.NextFromLast(true, last.CreatedAt, last.ReportID)
+	}
+	return out, nextCursor, nil
 }

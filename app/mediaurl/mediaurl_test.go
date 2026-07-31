@@ -98,3 +98,28 @@ func TestValidPrivateReportPaths(t *testing.T) {
 		t.Fatal("wrong folder should be rejected")
 	}
 }
+
+func TestValidOwnedPrivateReportPaths(t *testing.T) {
+	t.Parallel()
+
+	owner := "11111111-1111-1111-1111-111111111111"
+	other := "22222222-2222-2222-2222-222222222222"
+	owned := owner + "/reports/a.jpg"
+	foreign := other + "/reports/private.jpg"
+
+	if !ValidOwnedPrivateReportPaths(nil, owner, MaxURLLen) {
+		t.Fatal("nil slice should be valid")
+	}
+	if !ValidOwnedPrivateReportPaths([]string{}, owner, MaxURLLen) {
+		t.Fatal("empty slice should be valid")
+	}
+	if !ValidOwnedPrivateReportPaths([]string{owned}, owner, MaxURLLen) {
+		t.Fatal("owned path should be valid")
+	}
+	if ValidOwnedPrivateReportPaths([]string{foreign}, owner, MaxURLLen) {
+		t.Fatal("other user's path should be rejected")
+	}
+	if ValidOwnedPrivateReportPaths([]string{owned}, "", MaxURLLen) {
+		t.Fatal("empty owner should reject non-empty paths")
+	}
+}
