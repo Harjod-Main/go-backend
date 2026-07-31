@@ -69,6 +69,15 @@ func (s *stubProfiles) SyncFromOAuth(context.Context, string, string, profile.OA
 func (s *stubProfiles) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
 	return nil, profile.ErrNotFound
 }
+func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, _ int) (int, error) {
+	return 0, nil
+}
+func (s *stubProfiles) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
+	return nil, nil
+}
+func (s *stubProfiles) LeaderboardRank(context.Context, string) (int, int, error) {
+	return 0, 0, profile.ErrNotFound
+}
 
 func performCreate(t *testing.T, repo *stubRepo, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()

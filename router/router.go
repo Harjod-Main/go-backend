@@ -83,7 +83,8 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 
 	authHandler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: profileRepo})
 	submissionsHandler := submissions.NewHandler(submissions.HandlerConfig{
-		Repo: submissions.NewPostgresRepo(pool),
+		Repo:     submissions.NewPostgresRepo(pool),
+		Profiles: profileRepo,
 	})
 	checkinsHandler := checkins.NewHandler(checkins.HandlerConfig{
 		Repo:     checkins.NewPostgresRepo(pool),
@@ -175,6 +176,13 @@ func registerProfileRoutes(r *gin.Engine, profileHandler *profile.Handler, verif
 		profileGroup.GET("", profileHandler.Get)
 		profileGroup.PATCH("", profileHandler.Update)
 	}
+	// Public leaderboard; auth optional so signed-in users get self rank.
+	r.GET(
+		"/api/v1/leaderboard",
+		localmw.IPRateLimit(60, time.Minute),
+		supabaseauth.OptionalMiddleware(verifier),
+		profileHandler.ListLeaderboard,
+	)
 }
 
 func registerSubmissionsRoutes(r *gin.Engine, submissionsHandler *submissions.Handler, verifier *supabaseauth.Verifier) {

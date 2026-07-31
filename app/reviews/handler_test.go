@@ -115,6 +115,18 @@ func (s *stubProfiles) Update(context.Context, string, *string, *string, *string
 	return nil, profile.ErrNotFound
 }
 
+func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
+	return amount, nil
+}
+
+func (s *stubProfiles) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
+	return nil, nil
+}
+
+func (s *stubProfiles) LeaderboardRank(context.Context, string) (int, int, error) {
+	return 0, 0, profile.ErrNotFound
+}
+
 func validCreateBody() map[string]any {
 	return map[string]any{
 		"placeId": testPlaceID,

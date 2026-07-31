@@ -9,6 +9,7 @@ import (
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/pagination"
+	"github.com/RinTanth/go-backend/app/points"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -171,6 +172,13 @@ func (h *Handler) Create(c *gin.Context) {
 			Message:    app.MessageInternalError,
 		})
 		return
+	}
+
+	if h.profiles != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.ReviewCreate); err != nil {
+			// Review is already persisted; log and continue so the user still gets their review.
+			slog.Error("award review points failed", "user_id", claims.Sub, "error", err)
+		}
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[Review]{

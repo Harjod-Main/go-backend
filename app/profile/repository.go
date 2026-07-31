@@ -26,4 +26,8 @@ type Repository interface {
 	// It never creates a row; returns ErrNotFound when the profile is missing.
 	SyncFromOAuth(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error)
 	Update(ctx context.Context, userID string, displayName, username *string, avatarURL *string, clearAvatar bool) (*Profile, error)
+	// AddCreditPoints increments profiles.credit_points and returns the new total.
+	AddCreditPoints(ctx context.Context, userID string, amount int) (int, error)
+	ListLeaderboard(ctx context.Context, limit int) ([]LeaderboardEntry, error)
+	LeaderboardRank(ctx context.Context, userID string) (rank int, creditPoints int, err error)
 }

@@ -46,6 +46,18 @@ func (s *stubRepo) Update(context.Context, string, *string, *string, *string, bo
 	return s.updateOut, s.updateErr
 }
 
+func (s *stubRepo) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
+	return amount, nil
+}
+
+func (s *stubRepo) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
+	return nil, nil
+}
+
+func (s *stubRepo) LeaderboardRank(context.Context, string) (int, int, error) {
+	return 0, 0, profile.ErrNotFound
+}
+
 func withClaims() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{

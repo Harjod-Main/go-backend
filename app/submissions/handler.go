@@ -8,6 +8,8 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/points"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -27,15 +29,17 @@ const (
 )
 
 type HandlerConfig struct {
-	Repo Repository
+	Repo     Repository
+	Profiles profile.Repository
 }
 
 type Handler struct {
-	repo Repository
+	repo     Repository
+	profiles profile.Repository
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
-	return &Handler{repo: cfg.Repo}
+	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
 }
 
 // Create handles POST /api/v1/places/submissions (auth required).
@@ -179,6 +183,12 @@ func (h *Handler) Create(c *gin.Context) {
 			Message:    app.MessageInternalError,
 		})
 		return
+	}
+
+	if h.profiles != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), uid, points.PlaceSubmission); err != nil {
+			slog.Error("award submission points failed", "user_id", uid, "error", err)
+		}
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[Submission]{

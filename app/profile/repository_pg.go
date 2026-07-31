@@ -207,6 +207,102 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 	return &p, nil
 }
 
+const addCreditPointsSQL = `
+UPDATE profiles
+SET credit_points = credit_points + $2,
+    updated_at = $3
+WHERE user_id = $1::uuid
+RETURNING credit_points
+`
+
+func (r *postgresRepo) AddCreditPoints(ctx context.Context, userID string, amount int) (int, error) {
+	if amount <= 0 {
+		return 0, fmt.Errorf("add credit points: amount must be positive")
+	}
+	var total int
+	err := r.pool.QueryRow(ctx, addCreditPointsSQL, userID, amount, time.Now().UTC()).Scan(&total)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, fmt.Errorf("add credit points: %w", err)
+	}
+	return total, nil
+}
+
+const listLeaderboardSQL = `
+SELECT
+  user_id::text,
+  display_name,
+  username,
+  avatar_url,
+  credit_points
+FROM profiles
+ORDER BY credit_points DESC, updated_at ASC, user_id ASC
+LIMIT $1
+`
+
+func (r *postgresRepo) ListLeaderboard(ctx context.Context, limit int) ([]LeaderboardEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.pool.Query(ctx, listLeaderboardSQL, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list leaderboard: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]LeaderboardEntry, 0, limit)
+	rank := 0
+	for rows.Next() {
+		rank++
+		var entry LeaderboardEntry
+		if err := rows.Scan(
+			&entry.UserID,
+			&entry.DisplayName,
+			&entry.Username,
+			&entry.AvatarURL,
+			&entry.CreditPoints,
+		); err != nil {
+			return nil, fmt.Errorf("scan leaderboard: %w", err)
+		}
+		entry.Rank = rank
+		out = append(out, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate leaderboard: %w", err)
+	}
+	return out, nil
+}
+
+const leaderboardRankSQL = `
+SELECT
+  credit_points,
+  1 + (
+    SELECT COUNT(*)::int
+    FROM profiles p2
+    WHERE p2.credit_points > p.credit_points
+       OR (p2.credit_points = p.credit_points AND (
+            p2.updated_at < p.updated_at
+            OR (p2.updated_at = p.updated_at AND p2.user_id < p.user_id)
+          ))
+  ) AS rank
+FROM profiles p
+WHERE p.user_id = $1::uuid
+`
+
+func (r *postgresRepo) LeaderboardRank(ctx context.Context, userID string) (int, int, error) {
+	var creditPoints, rank int
+	err := r.pool.QueryRow(ctx, leaderboardRankSQL, userID).Scan(&creditPoints, &rank)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, 0, ErrNotFound
+		}
+		return 0, 0, fmt.Errorf("leaderboard rank: %w", err)
+	}
+	return rank, creditPoints, nil
+}
+
 func defaultDisplayName(email string) string {
 	if at := strings.Index(email, "@"); at > 0 {
 		return email[:at]

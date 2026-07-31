@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -60,6 +61,42 @@ func (h *Handler) Get(c *gin.Context) {
 		Code:       app.CodeSuccess,
 		Message:    app.MessageSuccess,
 		Data:       p,
+	})
+}
+
+// ListLeaderboard handles GET /api/v1/leaderboard?limit=
+func (h *Handler) ListLeaderboard(c *gin.Context) {
+	limit := pagination.ParseLimit(c.Query("limit"), 20, 100)
+
+	entries, err := h.repo.ListLeaderboard(c.Request.Context(), limit)
+	if err != nil {
+		slog.Error("list leaderboard failed", "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[LeaderboardResponse]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if entries == nil {
+		entries = []LeaderboardEntry{}
+	}
+
+	resp := LeaderboardResponse{Entries: entries}
+	if claims, ok := supabaseauth.ClaimsFromGin(c); ok {
+		rank, creditPoints, rankErr := h.repo.LeaderboardRank(c.Request.Context(), claims.Sub)
+		if rankErr == nil {
+			resp.Self = &LeaderboardSelf{Rank: rank, CreditPoints: creditPoints}
+		} else if !errors.Is(rankErr, ErrNotFound) {
+			slog.Error("leaderboard self rank failed", "user_id", claims.Sub, "error", rankErr)
+		}
+	}
+
+	wrapper.Respond(c, wrapper.ResponseOption[LeaderboardResponse]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data:       &resp,
 	})
 }
 
