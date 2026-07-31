@@ -19,6 +19,15 @@ type Review struct {
 	Description *string   `json:"description,omitempty"`
 	PhotoURLs   []string  `json:"photo_urls,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	LikeCount   int       `json:"like_count"`
+	LikedByMe   bool      `json:"liked_by_me"`
+}
+
+// ReviewLikeResponse is returned after liking/unliking a review.
+type ReviewLikeResponse struct {
+	ReviewID  string `json:"reviewId"`
+	Liked     bool   `json:"liked"`
+	LikeCount int    `json:"likeCount"`
 }
 
 // ReviewListResponse is the API response for listing reviews.

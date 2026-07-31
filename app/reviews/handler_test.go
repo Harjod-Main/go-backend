@@ -45,13 +45,27 @@ type stubRepo struct {
 	listCursor     *pagination.Cursor
 }
 
-func (s *stubRepo) ListByPlace(_ context.Context, _ string, limit int, cursor *pagination.Cursor) ([]reviews.Review, *string, error) {
+func (s *stubRepo) ListByPlace(
+	_ context.Context,
+	_ string,
+	limit int,
+	cursor *pagination.Cursor,
+	_ string,
+) ([]reviews.Review, *string, error) {
 	s.listLimit = limit
 	s.listCursor = cursor
 	if s.listErr != nil {
 		return nil, nil, s.listErr
 	}
 	return s.listItems, s.listNextCursor, nil
+}
+
+func (s *stubRepo) ReviewExists(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+
+func (s *stubRepo) SetReviewLiked(_ context.Context, _, _ string, _ bool) (int, error) {
+	return 0, nil
 }
 
 func (s *stubRepo) Create(_ context.Context, review *reviews.Review) error {

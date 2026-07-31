@@ -60,7 +60,6 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	placesHandler := places.NewHandler(places.HandlerConfig{
 		Repo: places.NewPostgresRepo(pool),
 	})
-	registerPlacesRoutes(r, placesHandler)
 
 	profileRepo := profile.NewPostgresRepo(pool)
 	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
@@ -90,6 +89,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		Repo:     checkins.NewPostgresRepo(pool),
 		Profiles: profileRepo,
 	})
+	registerPlacesRoutes(r, placesHandler, verifier)
 	registerAuthRoutes(r, authHandler, verifier)
 	registerReviewsRoutes(r, reviewsHandler, verifier)
 	registerReportsRoutes(r, reportsHandler, verifier)
@@ -107,7 +107,7 @@ func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supa
 	}
 }
 
-func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
+func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler, verifier *supabaseauth.Verifier) {
 	placesGroup := r.Group("/api/v1/places")
 	// Public map reads are unauthenticated — bound per-IP burst traffic.
 	// Per-process limiter; see middleware.IPRateLimit scaling note before adding replicas.
@@ -118,6 +118,14 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 		placesGroup.GET("/:placeId/rate", placesHandler.GetRate)
 		placesGroup.GET("/:placeId/privileges", placesHandler.GetPrivileges)
 		placesGroup.GET("/:placeId/quote", placesHandler.GetQuote)
+		placesGroup.GET("/:placeId/reaction", supabaseauth.OptionalMiddleware(verifier), placesHandler.GetReaction)
+	}
+
+	placeReactionWrites := r.Group("/api/v1/places/:placeId/reaction")
+	placeReactionWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		placeReactionWrites.PUT("", placesHandler.SetReaction)
+		placeReactionWrites.DELETE("", placesHandler.ClearReaction)
 	}
 
 	// Public batch quote reads can fan out into heavy DB work, so keep them on the
@@ -132,7 +140,12 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler) {
 }
 
 func registerReviewsRoutes(r *gin.Engine, reviewsHandler *reviews.Handler, verifier *supabaseauth.Verifier) {
-	r.GET("/api/v1/places/:placeId/reviews", localmw.IPRateLimit(60, time.Minute), reviewsHandler.ListByPlace)
+	r.GET(
+		"/api/v1/places/:placeId/reviews",
+		localmw.IPRateLimit(60, time.Minute),
+		supabaseauth.OptionalMiddleware(verifier),
+		reviewsHandler.ListByPlace,
+	)
 
 	reviewWrites := r.Group("/api/v1/places/:placeId/reviews")
 	reviewWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
@@ -144,6 +157,8 @@ func registerReviewsRoutes(r *gin.Engine, reviewsHandler *reviews.Handler, verif
 	reviewMutations.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
 	{
 		reviewMutations.PATCH("", reviewsHandler.Update)
+		reviewMutations.PUT("/like", reviewsHandler.SetLike)
+		reviewMutations.DELETE("/like", reviewsHandler.ClearLike)
 	}
 }
 

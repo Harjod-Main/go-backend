@@ -99,6 +99,28 @@ func (s *stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, err
 	return s.evCharger, nil
 }
 
+func (s *stubRepo) PlaceExists(context.Context, string) (bool, error) {
+	return true, nil
+}
+
+func (s *stubRepo) GetPlaceReaction(context.Context, string, string) (*places.PlaceReactionResponse, error) {
+	return &places.PlaceReactionResponse{}, nil
+}
+
+func (s *stubRepo) SetPlaceReaction(
+	context.Context,
+	string,
+	string,
+	places.PlaceReactionKind,
+) (*places.PlaceReactionResponse, error) {
+	like := places.PlaceReactionLike
+	return &places.PlaceReactionResponse{MyReaction: &like}, nil
+}
+
+func (s *stubRepo) ClearPlaceReaction(context.Context, string, string) (*places.PlaceReactionResponse, error) {
+	return &places.PlaceReactionResponse{}, nil
+}
+
 func samplePlaces() []places.Place {
 	freeMinutes := 30
 	return []places.Place{{

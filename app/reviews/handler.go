@@ -64,7 +64,7 @@ func (h *Handler) ListByPlace(c *gin.Context) {
 		cursor = &decoded
 	}
 
-	reviews, nextCursor, err := h.repo.ListByPlace(c.Request.Context(), placeID, limit, cursor)
+	reviews, nextCursor, err := h.repo.ListByPlace(c.Request.Context(), placeID, limit, cursor, viewerUserID(c))
 	if err != nil {
 		slog.Error("list reviews failed", "place_id", placeID, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[ReviewListResponse]{
@@ -81,6 +81,83 @@ func (h *Handler) ListByPlace(c *gin.Context) {
 		HasMore:    nextCursor != nil,
 	}
 	wrapper.Respond(c, wrapper.ResponseOption[ReviewListResponse]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data:       &resp,
+	})
+}
+
+func viewerUserID(c *gin.Context) string {
+	if claims, ok := supabaseauth.ClaimsFromGin(c); ok {
+		return claims.Sub
+	}
+	return ""
+}
+
+// SetLike handles PUT /api/v1/reviews/:reviewId/like (auth required).
+func (h *Handler) SetLike(c *gin.Context) {
+	h.setLikeState(c, true)
+}
+
+// ClearLike handles DELETE /api/v1/reviews/:reviewId/like (auth required).
+func (h *Handler) ClearLike(c *gin.Context) {
+	h.setLikeState(c, false)
+}
+
+func (h *Handler) setLikeState(c *gin.Context, liked bool) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[ReviewLikeResponse]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	reviewID := strings.TrimSpace(c.Param("reviewId"))
+	if _, err := uuid.Parse(reviewID); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[ReviewLikeResponse]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	exists, err := h.repo.ReviewExists(c.Request.Context(), reviewID)
+	if err != nil {
+		slog.Error("check review for like failed", "review_id", reviewID, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[ReviewLikeResponse]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if !exists {
+		wrapper.Respond(c, wrapper.ResponseOption[ReviewLikeResponse]{
+			HTTPStatus: http.StatusNotFound,
+			Code:       app.CodeNotFound,
+			Message:    app.MessageNotFound,
+		})
+		return
+	}
+
+	count, err := h.repo.SetReviewLiked(c.Request.Context(), reviewID, claims.Sub, liked)
+	if err != nil {
+		slog.Error("set review like failed", "review_id", reviewID, "user_id", claims.Sub, "liked", liked, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[ReviewLikeResponse]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+
+	resp := ReviewLikeResponse{ReviewID: reviewID, Liked: liked, LikeCount: count}
+	wrapper.Respond(c, wrapper.ResponseOption[ReviewLikeResponse]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
 		Message:    app.MessageSuccess,

@@ -129,3 +129,21 @@ type EVProvider struct {
 type EVConnector struct {
 	ConnectorType string `json:"connector_type"`
 }
+
+type PlaceReactionKind string
+
+const (
+	PlaceReactionLike   PlaceReactionKind = "like"
+	PlaceReactionUnlike PlaceReactionKind = "unlike"
+)
+
+type PlaceReactionRequest struct {
+	Reaction PlaceReactionKind `json:"reaction" binding:"required"`
+}
+
+type PlaceReactionResponse struct {
+	PlaceID      string             `json:"placeId"`
+	MyReaction   *PlaceReactionKind `json:"myReaction,omitempty"`
+	LikeCount    int                `json:"likeCount"`
+	UnlikeCount  int                `json:"unlikeCount"`
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/RinTanth/go-backend/app/pagination"
@@ -21,33 +22,50 @@ func NewPostgresRepo(pool *pgxpool.Pool) Repository {
 
 const listByPlaceSQL = `
 SELECT
-	review_id::text,
-	place_id::text,
-	user_id::text,
-	display_name,
-	rating,
-	description,
-	photo_urls,
-	created_at
-FROM reviews
-WHERE place_id = $1::uuid
+	r.review_id::text,
+	r.place_id::text,
+	r.user_id::text,
+	r.display_name,
+	r.rating,
+	r.description,
+	r.photo_urls,
+	r.created_at,
+	COALESCE(lc.like_count, 0)::int AS like_count,
+	CASE
+		WHEN $5::uuid IS NULL THEN false
+		ELSE EXISTS (
+			SELECT 1 FROM review_likes rl
+			WHERE rl.review_id = r.review_id AND rl.user_id = $5::uuid
+		)
+	END AS liked_by_me
+FROM reviews r
+LEFT JOIN (
+	SELECT review_id, COUNT(*)::int AS like_count
+	FROM review_likes
+	GROUP BY review_id
+) lc ON lc.review_id = r.review_id
+WHERE r.place_id = $1::uuid
   AND (
     $2::timestamptz IS NULL
-    OR (created_at, review_id) < ($2::timestamptz, $3::uuid)
+    OR (r.created_at, r.review_id) < ($2::timestamptz, $3::uuid)
   )
-ORDER BY created_at DESC, review_id DESC
+ORDER BY r.created_at DESC, r.review_id DESC
 LIMIT $4
 `
 
-func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit int, cursor *pagination.Cursor) ([]Review, *string, error) {
+func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit int, cursor *pagination.Cursor, viewerUserID string) ([]Review, *string, error) {
 	var cursorAt any
 	var cursorID any
 	if cursor != nil {
 		cursorAt = cursor.CreatedAt
 		cursorID = cursor.ID
 	}
+	var viewer any
+	if strings.TrimSpace(viewerUserID) != "" {
+		viewer = viewerUserID
+	}
 
-	rows, err := r.pool.Query(ctx, listByPlaceSQL, placeID, cursorAt, cursorID, limit+1)
+	rows, err := r.pool.Query(ctx, listByPlaceSQL, placeID, cursorAt, cursorID, limit+1, viewer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list reviews: %w", err)
 	}
@@ -66,6 +84,8 @@ func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit in
 			&rv.Description,
 			&photoURLs,
 			&rv.CreatedAt,
+			&rv.LikeCount,
+			&rv.LikedByMe,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan review: %w", err)
 		}
@@ -151,4 +171,46 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, review *Review
 	}
 	review.UserID = userID
 	return nil
+}
+
+func (r *postgresRepo) ReviewExists(ctx context.Context, reviewID string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM reviews WHERE review_id = $1::uuid)`, reviewID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check review exists: %w", err)
+	}
+	return exists, nil
+}
+
+const insertReviewLikeSQL = `
+INSERT INTO review_likes (review_id, user_id, created_at)
+VALUES ($1::uuid, $2::uuid, $3)
+ON CONFLICT (review_id, user_id) DO NOTHING
+`
+
+const deleteReviewLikeSQL = `
+DELETE FROM review_likes
+WHERE review_id = $1::uuid AND user_id = $2::uuid
+`
+
+const countReviewLikesSQL = `
+SELECT COUNT(*)::int FROM review_likes WHERE review_id = $1::uuid
+`
+
+func (r *postgresRepo) SetReviewLiked(ctx context.Context, reviewID, userID string, liked bool) (int, error) {
+	now := time.Now().UTC()
+	if liked {
+		if _, err := r.pool.Exec(ctx, insertReviewLikeSQL, reviewID, userID, now); err != nil {
+			return 0, fmt.Errorf("insert review like: %w", err)
+		}
+	} else {
+		if _, err := r.pool.Exec(ctx, deleteReviewLikeSQL, reviewID, userID); err != nil {
+			return 0, fmt.Errorf("delete review like: %w", err)
+		}
+	}
+	var count int
+	if err := r.pool.QueryRow(ctx, countReviewLikesSQL, reviewID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count review likes: %w", err)
+	}
+	return count, nil
 }
