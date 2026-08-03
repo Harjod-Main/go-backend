@@ -58,7 +58,8 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	}
 	mediaurl.Configure(cfg.Supabase.ProjectURL)
 	placesHandler := places.NewHandler(places.HandlerConfig{
-		Repo: places.NewPostgresRepo(pool),
+		Repo:   places.NewPostgresRepo(pool),
+		Google: places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
 	})
 
 	profileRepo := profile.NewPostgresRepo(pool)
@@ -115,6 +116,8 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler, verifier
 	{
 		// Public read — map is available to guests (matches Supabase RLS public SELECT).
 		placesGroup.GET("", placesHandler.List)
+		placesGroup.GET("/autocomplete", placesHandler.Autocomplete)
+		placesGroup.GET("/details/:placeId", placesHandler.GetPlaceDetails)
 		placesGroup.GET("/:placeId/rate", placesHandler.GetRate)
 		placesGroup.GET("/:placeId/privileges", placesHandler.GetPrivileges)
 		placesGroup.GET("/:placeId/quote", placesHandler.GetQuote)

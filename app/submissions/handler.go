@@ -19,7 +19,10 @@ const (
 	maxSubmissionBodyBytes       = 256 * 1024
 	maxSubmissionNameLen         = 160
 	maxSubmissionAddressLen      = 500
+	maxSubmissionAdminAreaLen    = 120
+	maxSubmissionPostalCodeLen   = 20
 	maxSubmissionPlaceTypeLen    = 80
+	maxSubmissionGooglePlaceIDLen = 256
 	maxSubmissionMoneyFieldLen   = 80
 	maxSubmissionAmenities       = 32
 	maxSubmissionPhotos          = 10
@@ -154,10 +157,73 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	uid := claims.Sub
+	nameTh := optionalTrimmed(body.NameTh, maxSubmissionNameLen)
+	nameEn := optionalTrimmed(body.NameEn, maxSubmissionNameLen)
+	if body.NameTh != nil && nameTh == nil && strings.TrimSpace(*body.NameTh) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[Submission]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	if body.NameEn != nil && nameEn == nil && strings.TrimSpace(*body.NameEn) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[Submission]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	if nameTh == nil {
+		nameTh = &name
+	}
+	if nameEn == nil {
+		nameEn = &name
+	}
+	googlePlaceID := optionalTrimmed(body.GooglePlaceID, maxSubmissionGooglePlaceIDLen)
+	if body.GooglePlaceID != nil && googlePlaceID == nil && strings.TrimSpace(*body.GooglePlaceID) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[Submission]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	addressTh, addressEn, subdistrictTh, subdistrictEn, districtTh, districtEn, provinceTh, provinceEn, postalCode, ok :=
+		parseStructuredAddressFields(body)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[Submission]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	if addressTh == nil && address != nil {
+		addressTh = address
+	}
+	if addressEn == nil && address != nil {
+		addressEn = address
+	}
+
 	submission := Submission{
 		UserID:            &uid,
 		Name:              name,
+		NameTh:            nameTh,
+		NameEn:            nameEn,
+		GooglePlaceID:     googlePlaceID,
 		Address:           address,
+		AddressTh:         addressTh,
+		AddressEn:         addressEn,
+		SubdistrictTh:     subdistrictTh,
+		SubdistrictEn:     subdistrictEn,
+		DistrictTh:        districtTh,
+		DistrictEn:        districtEn,
+		ProvinceTh:        provinceTh,
+		ProvinceEn:        provinceEn,
+		PostalCode:        postalCode,
 		Latitude:          body.Latitude,
 		Longitude:         body.Longitude,
 		PlaceType:         placeType,
@@ -213,6 +279,63 @@ func validOptionalTrimmed(value *string, maxLen int) bool {
 		return true
 	}
 	return len(strings.TrimSpace(*value)) <= maxLen
+}
+
+func optionalTrimmed(value *string, maxLen int) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" || len(trimmed) > maxLen {
+		return nil
+	}
+	return &trimmed
+}
+
+// optionalTrimmedOrReject returns (nil, true) for empty/nil, (value, true) when
+// valid, and (nil, false) when the non-empty value exceeds maxLen.
+func optionalTrimmedOrReject(value *string, maxLen int) (*string, bool) {
+	if value == nil {
+		return nil, true
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil, true
+	}
+	if len(trimmed) > maxLen {
+		return nil, false
+	}
+	return &trimmed, true
+}
+
+func parseStructuredAddressFields(body CreateSubmissionRequest) (
+	addressTh, addressEn, subdistrictTh, subdistrictEn, districtTh, districtEn, provinceTh, provinceEn, postalCode *string,
+	ok bool,
+) {
+	type field struct {
+		src *string
+		max int
+		dst **string
+	}
+	fields := []field{
+		{body.AddressTh, maxSubmissionAddressLen, &addressTh},
+		{body.AddressEn, maxSubmissionAddressLen, &addressEn},
+		{body.SubdistrictTh, maxSubmissionAdminAreaLen, &subdistrictTh},
+		{body.SubdistrictEn, maxSubmissionAdminAreaLen, &subdistrictEn},
+		{body.DistrictTh, maxSubmissionAdminAreaLen, &districtTh},
+		{body.DistrictEn, maxSubmissionAdminAreaLen, &districtEn},
+		{body.ProvinceTh, maxSubmissionAdminAreaLen, &provinceTh},
+		{body.ProvinceEn, maxSubmissionAdminAreaLen, &provinceEn},
+		{body.PostalCode, maxSubmissionPostalCodeLen, &postalCode},
+	}
+	for _, f := range fields {
+		v, fieldOK := optionalTrimmedOrReject(f.src, f.max)
+		if !fieldOK {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
+		}
+		*f.dst = v
+	}
+	return addressTh, addressEn, subdistrictTh, subdistrictEn, districtTh, districtEn, provinceTh, provinceEn, postalCode, true
 }
 
 func validRawJSONSize(raw []byte) bool {

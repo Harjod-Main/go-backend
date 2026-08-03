@@ -20,7 +20,7 @@ const (
 	maxPlaceFeedbackBodyBytes = 128 * 1024
 
 	maxIssueDescriptionLen   = 4000
-	maxReviewReportDetailLen = 1000
+	maxReviewReportDetailLen = 4000
 	maxPlaceFeedbackTextLen  = 4000
 	maxReporterEmailLen      = 254
 	maxFeedbackValueFieldLen = 500

@@ -27,6 +27,21 @@ FROM (
 		pl.province_th,
 		pl.postal_code,
 		COALESCE((
+			SELECT array_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
+			FROM place_images img
+			WHERE img.entity_type = 'place'
+				AND img.entity_id = pl.place_id::text
+				AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
+		), COALESCE((
+			SELECT ps.photo_urls
+			FROM place_submissions ps
+			WHERE ps.place_id = pl.place_id
+				AND ps.status = 'approved'
+				AND COALESCE(cardinality(ps.photo_urls), 0) > 0
+			ORDER BY ps.created_at DESC
+			LIMIT 1
+		), '{}'::text[])) AS photo_urls,
+		COALESCE((
 			SELECT json_agg(area_obj)
 			FROM (
 				SELECT json_build_object(

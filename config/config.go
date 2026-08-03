@@ -16,6 +16,7 @@ type Config struct {
 	Postgres      Postgres
 	Header        Header
 	Supabase      Supabase
+	GooglePlaces  GooglePlaces
 }
 
 type Server struct {
@@ -43,6 +44,12 @@ type Supabase struct {
 	ProjectURL string `env:"SUPABASE_PROJECT_URL,notEmpty"`
 	// Audience defaults to "authenticated" for user access tokens.
 	Audience string `env:"SUPABASE_JWT_AUDIENCE" envDefault:"authenticated"`
+}
+
+// GooglePlaces holds the server-side Places API (New) key used for autocomplete proxying.
+type GooglePlaces struct {
+	// APIKey is required for /places/autocomplete and /places/details. Keep server-only.
+	APIKey string `env:"SECRET_GOOGLE_PLACES_API_KEY"`
 }
 
 type Postgres struct {

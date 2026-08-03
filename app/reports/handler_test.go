@@ -452,7 +452,7 @@ func TestCreateReviewReport_RejectsDetailOverLengthCap(t *testing.T) {
 	repo := &stubRepo{reviewExists: true}
 
 	body := validReviewReportBody()
-	body["detail"] = strings.Repeat("a", 1001)
+	body["detail"] = strings.Repeat("a", 4001)
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
