@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const maxCheckInCreateBodyBytes = 64 * 1024
+
 type HandlerConfig struct {
 	Repo     Repository
 	Profiles profile.Repository
@@ -106,6 +108,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCheckInCreateBodyBytes)
 	var body CreateCheckInRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[CheckIn]{

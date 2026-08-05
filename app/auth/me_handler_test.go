@@ -47,6 +47,18 @@ func (s *stubProfileRepo) Update(context.Context, string, *string, *string, *str
 	return nil, nil
 }
 
+func (s *stubProfileRepo) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
+	return amount, nil
+}
+
+func (s *stubProfileRepo) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
+	return nil, nil
+}
+
+func (s *stubProfileRepo) LeaderboardRank(context.Context, string) (int, int, error) {
+	return 0, 0, profile.ErrNotFound
+}
+
 func TestMe_WithValidToken(t *testing.T) {
 	r := require.New(t)
 	gin.SetMode(gin.TestMode)

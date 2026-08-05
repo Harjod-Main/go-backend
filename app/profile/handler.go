@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxProfileUpdateBodyBytes = 16 * 1024
+
 type HandlerConfig struct {
 	Repo Repository
 }
@@ -112,6 +114,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxProfileUpdateBodyBytes)
 	var body UpdateProfileRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[Profile]{

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -120,4 +121,25 @@ func TestUpdateProfile_EnsuresBeforeUpdate(t *testing.T) {
 	r.Equal(http.StatusOK, w.Code)
 	r.Equal(int32(1), repo.ensureCalls.Load())
 	r.Equal(int32(1), repo.updateCalls.Load())
+}
+
+func TestUpdateProfile_RejectsOversizedBody(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{}
+	handler := profile.NewHandler(profile.HandlerConfig{Repo: repo})
+
+	engine := gin.New()
+	engine.Use(withClaims())
+	engine.PATCH("/api/v1/profile", handler.Update)
+
+	body := bytes.NewBufferString(`{"displayName":"` + strings.Repeat("x", 20*1024) + `"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/profile", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
+	r.Equal(int32(0), repo.updateCalls.Load())
 }

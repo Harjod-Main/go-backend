@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,18 @@ func TestCreate_RejectsMissingPlace(t *testing.T) {
 		"satisfied": satisfied,
 	})
 	r.Equal(http.StatusNotFound, w.Code)
+	r.False(repo.createCalled)
+}
+
+func TestCreate_RejectsOversizedBody(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{exists: true}
+	w := performCreate(t, repo, map[string]any{
+		"occupancy": "normal",
+		"satisfied": true,
+		"comment":   strings.Repeat("x", 70*1024),
+	})
+	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createCalled)
 }
 

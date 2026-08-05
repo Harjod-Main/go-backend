@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const maxPlaceReactionBodyBytes = 4 * 1024
+
 // GetReaction handles GET /api/v1/places/:placeId/reaction (auth optional).
 func (h *Handler) GetReaction(c *gin.Context) {
 	placeID := strings.TrimSpace(c.Param("placeId"))
@@ -87,6 +89,7 @@ func (h *Handler) SetReaction(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPlaceReactionBodyBytes)
 	var body PlaceReactionRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[PlaceReactionResponse]{
