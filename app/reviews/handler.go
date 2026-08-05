@@ -75,6 +75,9 @@ func (h *Handler) ListByPlace(c *gin.Context) {
 		return
 	}
 
+	if reviews == nil {
+		reviews = []Review{}
+	}
 	resp := ReviewListResponse{
 		Reviews:    reviews,
 		NextCursor: nextCursor,

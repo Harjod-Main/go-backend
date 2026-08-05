@@ -123,13 +123,16 @@ func (s *stubRepo) ClearPlaceReaction(context.Context, string, string) (*places.
 
 func samplePlaces() []places.Place {
 	freeMinutes := 30
+	avgRating := 4.5
 	return []places.Place{{
-		PlaceID:   "11111111-1111-1111-1111-111111111111",
-		NameTh:    "สยามพารากอน",
-		NameEn:    "Siam Paragon",
-		PlaceType: "shopping_mall",
-		Latitude:  13.746,
-		Longitude: 100.535,
+		PlaceID:     "11111111-1111-1111-1111-111111111111",
+		NameTh:      "สยามพารากอน",
+		NameEn:      "Siam Paragon",
+		PlaceType:   "shopping_mall",
+		Latitude:    13.746,
+		Longitude:   100.535,
+		AvgRating:   &avgRating,
+		ReviewCount: 3,
 		ParkingArea: []places.ParkingArea{{
 			Rate: []places.Rate{{
 				FreeMinutes: &freeMinutes,
@@ -172,6 +175,9 @@ func TestList_ReturnsPlaces(t *testing.T) {
 	r.Len(body.Data, 1)
 	r.Equal("Siam Paragon", body.Data[0].NameEn)
 	r.Equal("shopping_mall", body.Data[0].PlaceType)
+	r.NotNil(body.Data[0].AvgRating)
+	r.Equal(4.5, *body.Data[0].AvgRating)
+	r.Equal(3, body.Data[0].ReviewCount)
 	r.Equal(30, *body.Data[0].ParkingArea[0].Rate[0].FreeMinutes)
 	r.Equal(40.0, body.Data[0].ParkingArea[0].Rate[0].RateTier[0].Price)
 }

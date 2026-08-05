@@ -13,6 +13,8 @@ type Place struct {
 	ProvinceTh   *string        `json:"province_th"`
 	PostalCode   *string        `json:"postal_code"`
 	PhotoURLs    []string       `json:"photo_urls"`
+	AvgRating    *float64       `json:"avg_rating"`
+	ReviewCount  int            `json:"review_count"`
 	ParkingArea  []ParkingArea  `json:"parking_area"`
 }
 

@@ -41,6 +41,8 @@ FROM (
 			ORDER BY ps.created_at DESC
 			LIMIT 1
 		), '{}'::text[])) AS photo_urls,
+		rev.avg_rating,
+		COALESCE(rev.review_count, 0) AS review_count,
 		COALESCE((
 			SELECT json_agg(area_obj)
 			FROM (
@@ -91,6 +93,14 @@ FROM (
 			) areas
 		), '[]'::json) AS parking_area
 	FROM places pl
+	LEFT JOIN (
+		SELECT
+			place_id,
+			ROUND(AVG(rating)::numeric, 1)::float8 AS avg_rating,
+			COUNT(*)::int AS review_count
+		FROM reviews
+		GROUP BY place_id
+	) rev ON rev.place_id = pl.place_id
 	WHERE COALESCE(pl.is_blacklisted, false) = false
 ) p
 `
