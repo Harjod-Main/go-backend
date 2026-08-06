@@ -10,25 +10,29 @@ import (
 	"testing"
 
 	"github.com/RinTanth/go-backend/app/places"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
 type stubRepo struct {
-	places         []places.Place
-	err            error
-	listCalls      atomic.Int32
-	rate           *places.PlaceRateDetail
-	rates          map[string]*places.PlaceRateDetail
-	rateErr        error
-	ratesCalls     atomic.Int32
-	privileges     *places.PlacePrivileges
-	privilegesErr  error
-	validation     *places.Validation
-	reserved       *places.Reserved
-	evCharger      *places.EVCharger
-	detailErr      error
+	places            []places.Place
+	err               error
+	listCalls         atomic.Int32
+	rate              *places.PlaceRateDetail
+	rates             map[string]*places.PlaceRateDetail
+	rateErr           error
+	ratesCalls        atomic.Int32
+	privileges        *places.PlacePrivileges
+	privilegesErr     error
+	validation        *places.Validation
+	reserved          *places.Reserved
+	evCharger         *places.EVCharger
+	detailErr         error
+	updatedValidation *places.Validation
+	firstCorrection   bool
+	updateErr         error
 }
 
 func (s *stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
@@ -85,6 +89,28 @@ func (s *stubRepo) GetValidation(context.Context, string) (*places.Validation, e
 	return s.validation, nil
 }
 
+func (s *stubRepo) UpdateValidation(
+	_ context.Context,
+	_ string,
+	in places.UpdateValidationInput,
+) (*places.Validation, bool, error) {
+	if s.updateErr != nil {
+		return nil, false, s.updateErr
+	}
+	if s.updatedValidation != nil {
+		return s.updatedValidation, s.firstCorrection, nil
+	}
+	if s.validation == nil {
+		return nil, false, nil
+	}
+	updated := *s.validation
+	updated.ValidationType = in.ValidationType
+	updated.ConditionDescription = in.ConditionDescription
+	updated.Notes = in.Notes
+	updated.ValidationLocation = in.ValidationLocation
+	return &updated, s.firstCorrection, nil
+}
+
 func (s *stubRepo) GetReserved(context.Context, string) (*places.Reserved, error) {
 	if s.detailErr != nil {
 		return nil, s.detailErr
@@ -119,6 +145,33 @@ func (s *stubRepo) SetPlaceReaction(
 
 func (s *stubRepo) ClearPlaceReaction(context.Context, string, string) (*places.PlaceReactionResponse, error) {
 	return &places.PlaceReactionResponse{}, nil
+}
+
+type stubProfiles struct {
+	total int
+}
+
+func (s *stubProfiles) GetByUserID(context.Context, string) (*profile.Profile, error) {
+	return nil, profile.ErrNotFound
+}
+func (s *stubProfiles) Ensure(_ context.Context, userID, _ string, _ profile.OAuthSeed) (*profile.Profile, error) {
+	return &profile.Profile{UserID: userID, DisplayName: "u", Username: "user"}, nil
+}
+func (s *stubProfiles) SyncFromOAuth(context.Context, string, string, profile.OAuthSeed) (*profile.Profile, error) {
+	return nil, profile.ErrNotFound
+}
+func (s *stubProfiles) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
+	return nil, profile.ErrNotFound
+}
+func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
+	s.total += amount
+	return s.total, nil
+}
+func (s *stubProfiles) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
+	return nil, nil
+}
+func (s *stubProfiles) LeaderboardRank(context.Context, string) (int, int, error) {
+	return 0, 0, profile.ErrNotFound
 }
 
 func samplePlaces() []places.Place {

@@ -5,11 +5,28 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/points"
+	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+const (
+	maxStampCorrectionBodyBytes = 32 * 1024
+	maxConditionDescriptionLen  = 4000
+	maxStampNotesLen            = 2000
+	maxStampLocationLen         = 500
+)
+
+type updateStampRequest struct {
+	Category             string  `json:"category"`
+	ConditionDescription string  `json:"condition_description"`
+	Notes                *string `json:"notes"`
+	Location             *string `json:"location"`
+}
 
 // GetPrivileges returns parking stamps, reserved spots, and EV chargers for a place.
 func (h *Handler) GetPrivileges(c *gin.Context) {
@@ -109,4 +126,173 @@ func respondPrivilegeDetail[T any](c *gin.Context, kind, id string, payload *T, 
 		Message:    app.MessageSuccess,
 		Data:       payload,
 	})
+}
+
+// UpdateStamp handles PATCH /api/v1/privileges/stamp/:id (auth required).
+func (h *Handler) UpdateStamp(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if _, err := uuid.Parse(id); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxStampCorrectionBodyBytes)
+	var body updateStampRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	validationType, ok := mapStampCategoryToValidationType(body.Category)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	condition := strings.TrimSpace(body.ConditionDescription)
+	if len(condition) > maxConditionDescriptionLen {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	notes := trimOptional(body.Notes, maxStampNotesLen)
+	if body.Notes != nil && notes == nil && strings.TrimSpace(*body.Notes) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	location := trimOptional(body.Location, maxStampLocationLen)
+	if body.Location != nil && location == nil && strings.TrimSpace(*body.Location) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	if condition == "" && location == nil {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	if h.profiles != nil {
+		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
+			slog.Error("ensure profile before stamp correction failed", "user_id", claims.Sub, "error", err)
+			wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+				HTTPStatus: http.StatusInternalServerError,
+				Code:       app.CodeInternalError,
+				Message:    app.MessageInternalError,
+			})
+			return
+		}
+	}
+
+	updated, firstCorrection, err := h.repo.UpdateValidation(c.Request.Context(), id, UpdateValidationInput{
+		ValidationType:       validationType,
+		ConditionDescription: condition,
+		Notes:                notes,
+		ValidationLocation:   location,
+		ChangedBy:            claims.Sub,
+	})
+	if err != nil {
+		slog.Error("update stamp failed", "validation_id", id, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if updated == nil {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusNotFound,
+			Code:       app.CodeNotFound,
+			Message:    app.MessageNotFound,
+		})
+		return
+	}
+
+	pointsAwarded := 0
+	if firstCorrection && h.profiles != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+			slog.Error("award stamp correction points failed", "user_id", claims.Sub, "error", err)
+		} else {
+			pointsAwarded = points.PrivilegeCorrection
+		}
+	}
+
+	wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data: &StampCorrectionResult{
+			Validation:    *updated,
+			PointsAwarded: pointsAwarded,
+		},
+	})
+}
+
+func mapStampCategoryToValidationType(category string) (string, bool) {
+	switch strings.ToUpper(strings.TrimSpace(category)) {
+	case "SPENDING":
+		return "spending", true
+	case "ACTIVITY":
+		return "event_ticket", true
+	case "BANK_CARD":
+		return "credential", true
+	case "MEMBERSHIP":
+		return "membership", true
+	case "OTHER":
+		return "other", true
+	default:
+		return "", false
+	}
+}
+
+func trimOptional(value *string, maxLen int) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	if len(trimmed) > maxLen {
+		return nil
+	}
+	return &trimmed
 }

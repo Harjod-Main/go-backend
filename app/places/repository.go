@@ -11,6 +11,7 @@ type Repository interface {
 	GetPlaceRates(ctx context.Context, placeIDs []string) (map[string]*PlaceRateDetail, error)
 	GetPlacePrivileges(ctx context.Context, placeID string) (*PlacePrivileges, error)
 	GetValidation(ctx context.Context, validationID string) (*Validation, error)
+	UpdateValidation(ctx context.Context, validationID string, in UpdateValidationInput) (*Validation, bool, error)
 	GetReserved(ctx context.Context, reservedID string) (*Reserved, error)
 	GetEVCharger(ctx context.Context, evChargerID string) (*EVCharger, error)
 	PlaceExists(ctx context.Context, placeID string) (bool, error)

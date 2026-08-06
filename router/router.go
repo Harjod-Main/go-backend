@@ -57,12 +57,13 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		return nil, nil, err
 	}
 	mediaurl.Configure(cfg.Supabase.ProjectURL)
+	profileRepo := profile.NewPostgresRepo(pool)
 	placesHandler := places.NewHandler(places.HandlerConfig{
-		Repo:   places.NewPostgresRepo(pool),
-		Google: places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
+		Repo:     places.NewPostgresRepo(pool),
+		Google:   places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
+		Profiles: profileRepo,
 	})
 
-	profileRepo := profile.NewPostgresRepo(pool)
 	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 	reviewsHandler := reviews.NewHandler(reviews.HandlerConfig{
 		Repo:     reviews.NewPostgresRepo(pool),
@@ -139,6 +140,12 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler, verifier
 	privilegesGroup.Use(localmw.IPRateLimit(60, time.Minute))
 	{
 		privilegesGroup.GET("/:kind/:id", placesHandler.GetPrivilegeDetail)
+	}
+
+	privilegeWrites := r.Group("/api/v1/privileges/stamp/:id")
+	privilegeWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		privilegeWrites.PATCH("", placesHandler.UpdateStamp)
 	}
 }
 
