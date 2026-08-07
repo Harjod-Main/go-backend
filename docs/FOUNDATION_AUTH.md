@@ -8,7 +8,8 @@ Branch: `feature/foundation-supabase-auth`
 |-------|--------|
 | Database | Supabase Postgres |
 | Auth (Google/Apple) | Supabase Auth → Go verifies JWT |
-| Auth (Line) | Custom later |
+| Auth (Line web) | Supabase Auth `custom:line` browser OAuth |
+| Auth (Line iOS/Android) | LINE Login SDK → Edge Function `line-login` → Supabase session → Go verifies JWT |
 | Custom Go `issue-token` | Removed — Supabase Auth is the only JWT issuer |
 | Legacy Google resolve | Removed — dead code (nil deps if wired) |
 
@@ -77,7 +78,7 @@ Expected: `userId`, `email`, `role` from JWT claims.
 - ~~Place rate sheet~~ → `GET /api/v1/places/:placeId/rate`
 - ~~Place privileges~~ → `GET /api/v1/places/:placeId/privileges` + `GET /api/v1/privileges/:kind/:id`
 - ~~`quotes` pricing API~~ → `GET /api/v1/places/:placeId/quote?hours=` + `POST /api/v1/quotes`
-- Line custom login
+- ~~Line custom login~~ → native LINE SDK + Supabase Edge Function `line-login` (web keeps `custom:line` OAuth)
 - Frontend: call Go places/rate/privileges instead of Supabase table reads
 - ~~Remove leftover legacy Google resolve~~ → deleted (`ResolveIdentify` + `app/auth/access`)
 
