@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -112,8 +113,55 @@ func validateFoundation(cfg Config) error {
 		if strings.TrimSpace(cfg.Server.TrustedProxyCIDRs) == "" {
 			return fmt.Errorf("TRUSTED_PROXY_CIDRS is required in PROD (set your load balancer ingress CIDR, not broad RFC1918); discover RemoteAddr via GET /debug/client-ip on DEV/UAT with ENABLE_DEBUG_CLIENT_IP=true")
 		}
+		if err := ValidatePostgresSSL(cfg.Postgres); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// ValidatePostgresSSL enforces TLS for Postgres in PROD.
+// DATABASE_URL must include sslmode=require|verify-ca|verify-full (not disable/allow/prefer).
+// Discrete DB_* fields use the same rule for DB_SSLMODE (default require).
+// No-op outside PROD so local Docker can use sslmode=disable.
+func ValidatePostgresSSL(pg Postgres) error {
+	if !IsProdEnv() {
+		return nil
+	}
+	if strings.TrimSpace(pg.DatabaseURL) != "" {
+		return validateDatabaseURLSSL(pg.DatabaseURL)
+	}
+	if strings.TrimSpace(pg.Host) == "" {
+		return nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(pg.SSLMode))
+	if mode == "" {
+		mode = "require"
+	}
+	return assertSecureSSLMode(mode, "DB_SSLMODE")
+}
+
+func validateDatabaseURLSSL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("DATABASE_URL is invalid: %w", err)
+	}
+	mode := strings.ToLower(strings.TrimSpace(u.Query().Get("sslmode")))
+	if mode == "" {
+		return fmt.Errorf("DATABASE_URL must include sslmode=require (or verify-ca / verify-full) in PROD")
+	}
+	return assertSecureSSLMode(mode, "DATABASE_URL sslmode")
+}
+
+func assertSecureSSLMode(mode, source string) error {
+	switch mode {
+	case "require", "verify-ca", "verify-full":
+		return nil
+	case "disable", "allow", "prefer":
+		return fmt.Errorf("%s=%q is not allowed in PROD; use require, verify-ca, or verify-full", source, mode)
+	default:
+		return fmt.Errorf("%s=%q is not allowed in PROD; use require, verify-ca, or verify-full", source, mode)
+	}
 }
 
 // ResetForTest clears the singleton so tests can reload config.

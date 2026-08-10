@@ -77,4 +77,82 @@ func TestValidateFoundation_ProdCORS(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	t.Run("PROD rejects DATABASE_URL without TLS", func(t *testing.T) {
+		Env = Prod
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
+		cfg.Server.TrustedProxyCIDRs = "10.0.0.1/32"
+		cfg.Postgres.DatabaseURL = "postgres://u:p@db.example.com:5432/postgres?sslmode=disable"
+		if err := validateFoundation(cfg); err == nil {
+			t.Fatal("expected error for sslmode=disable in PROD")
+		}
+	})
+
+	t.Run("PROD accepts DATABASE_URL with sslmode=require", func(t *testing.T) {
+		Env = Prod
+		cfg := base
+		cfg.AccessControl.AllowOrigin = "https://frontend-statio-s-projects.vercel.app"
+		cfg.Server.TrustedProxyCIDRs = "10.0.0.1/32"
+		cfg.Postgres.DatabaseURL = "postgres://u:p@db.example.com:5432/postgres?sslmode=require"
+		if err := validateFoundation(cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestValidatePostgresSSL(t *testing.T) {
+	prev := Env
+	t.Cleanup(func() { Env = prev })
+
+	t.Run("LOCAL allows disable", func(t *testing.T) {
+		Env = Local
+		err := ValidatePostgresSSL(Postgres{
+			DatabaseURL: "postgres://u:p@localhost:5432/postgres?sslmode=disable",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("PROD rejects missing sslmode on DATABASE_URL", func(t *testing.T) {
+		Env = Prod
+		err := ValidatePostgresSSL(Postgres{
+			DatabaseURL: "postgres://u:p@db.example.com:5432/postgres",
+		})
+		if err == nil {
+			t.Fatal("expected error when sslmode is missing")
+		}
+	})
+
+	t.Run("PROD rejects prefer", func(t *testing.T) {
+		Env = Prod
+		err := ValidatePostgresSSL(Postgres{
+			DatabaseURL: "postgres://u:p@db.example.com:5432/postgres?sslmode=prefer",
+		})
+		if err == nil {
+			t.Fatal("expected error for sslmode=prefer")
+		}
+	})
+
+	t.Run("PROD rejects discrete DB_SSLMODE=disable", func(t *testing.T) {
+		Env = Prod
+		err := ValidatePostgresSSL(Postgres{
+			Host:    "db.example.com",
+			SSLMode: "disable",
+		})
+		if err == nil {
+			t.Fatal("expected error for DB_SSLMODE=disable")
+		}
+	})
+
+	t.Run("PROD accepts verify-full", func(t *testing.T) {
+		Env = Prod
+		err := ValidatePostgresSSL(Postgres{
+			DatabaseURL: "postgres://u:p@db.example.com:5432/postgres?sslmode=verify-full",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }

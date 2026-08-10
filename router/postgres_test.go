@@ -40,3 +40,16 @@ func TestPostgresDSN_PrefersDatabaseURL(t *testing.T) {
 		t.Fatalf("got %q want %q", dsn, want)
 	}
 }
+
+func TestPostgresDSN_ProdRejectsInsecureDatabaseURL(t *testing.T) {
+	prev := config.Env
+	t.Cleanup(func() { config.Env = prev })
+	config.Env = config.Prod
+
+	_, err := postgresDSN(config.Postgres{
+		DatabaseURL: "postgres://u:p@host:5432/db?sslmode=disable",
+	})
+	if err == nil {
+		t.Fatal("expected error for sslmode=disable in PROD")
+	}
+}

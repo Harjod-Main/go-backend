@@ -32,7 +32,8 @@ Branch: `feature/foundation-supabase-auth`
    - `SUPABASE_PROJECT_URL`
 3. CORS (`ACCESS_CONTROL_ALLOW_ORIGIN`):
    - Local template defaults to `*` (Bearer auth, not cookies — acceptable for LOCAL)
-   - **PROD refuses `*`** — set the Vercel origin, e.g. `https://frontend-statio-s-projects.vercel.app`
+   - **PROD refuses `*`** — set the Vercel origin only, e.g. `https://frontend-sigma-pearl-96.vercel.app` (do not add `localhost`)
+   - Local Expo web should call `http://localhost:8080`, not the Render URL, so prod CORS stays locked down
 4. Optional until places/quotes APIs:
    - `DATABASE_URL` (Supabase **pooler** URI; prefer IPv4 host `*.pooler.supabase.com`)
 5. Run the API locally:

@@ -41,6 +41,9 @@ func newPostgresPool(cfg config.Config) (*pgxpool.Pool, error) {
 }
 
 func postgresDSN(cfg config.Postgres) (string, error) {
+	if err := config.ValidatePostgresSSL(cfg); err != nil {
+		return "", err
+	}
 	if cfg.DatabaseURL != "" {
 		return cfg.DatabaseURL, nil
 	}
