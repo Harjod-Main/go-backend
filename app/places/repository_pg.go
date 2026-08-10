@@ -533,6 +533,89 @@ func (r *postgresRepo) GetReserved(ctx context.Context, reservedID string) (*Res
 	return scanJSON[Reserved](ctx, r.pool, getReservedSQL, reservedID, "reserved")
 }
 
+const updateReservedSQL = `
+UPDATE reserved
+SET reservation_type = $2::reservation_type_enum,
+    program_id = NULL,
+    program_other = $3,
+    conditions = $4,
+    floor = $5
+WHERE reserved_id = $1::uuid
+`
+
+const hasReservedCorrectionSQL = `
+SELECT EXISTS(
+  SELECT 1 FROM audit_log
+  WHERE entity_type = 'reserved'
+    AND entity_id = $1
+    AND action = 'correct'
+    AND changed_by = $2
+)
+`
+
+const insertReservedAuditSQL = `
+INSERT INTO audit_log (entity_type, entity_id, action, old_data, changed_by, created_at)
+VALUES ('reserved', $1, 'correct', $2::jsonb, $3, NOW())
+`
+
+func (r *postgresRepo) UpdateReserved(
+	ctx context.Context,
+	reservedID string,
+	in UpdateReservedInput,
+) (*Reserved, bool, error) {
+	existing, err := r.GetReserved(ctx, reservedID)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing == nil {
+		return nil, false, nil
+	}
+
+	oldData, err := json.Marshal(existing)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode reserved audit: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin reserved update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, updateReservedSQL,
+		reservedID,
+		in.ReservationType,
+		in.ProgramOther,
+		in.Conditions,
+		in.Floor,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("update reserved: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, nil
+	}
+
+	var alreadyCorrected bool
+	if err := tx.QueryRow(ctx, hasReservedCorrectionSQL, reservedID, in.ChangedBy).Scan(&alreadyCorrected); err != nil {
+		return nil, false, fmt.Errorf("check reserved correction: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, insertReservedAuditSQL, reservedID, string(oldData), in.ChangedBy); err != nil {
+		return nil, false, fmt.Errorf("insert reserved audit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit reserved update: %w", err)
+	}
+
+	updated, err := r.GetReserved(ctx, reservedID)
+	if err != nil {
+		return nil, false, err
+	}
+	return updated, !alreadyCorrected, nil
+}
+
 const getEVChargerSQL = `
 SELECT json_build_object(
 	'ev_charger_id', ev.ev_charger_id::text,

@@ -283,6 +283,157 @@ func mapStampCategoryToValidationType(category string) (string, bool) {
 	}
 }
 
+type updateReservedRequest struct {
+	Category string  `json:"category"`
+	Name     string  `json:"name"`
+	Rule     *string `json:"rule"`
+	Location *string `json:"location"`
+}
+
+// UpdateReserved handles PATCH /api/v1/privileges/reserve/:id (auth required).
+func (h *Handler) UpdateReserved(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if _, err := uuid.Parse(id); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxStampCorrectionBodyBytes)
+	var body updateReservedRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	reservationType, ok := mapReserveCategoryToReservationType(body.Category)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	name := strings.TrimSpace(body.Name)
+	if name == "" || len(name) > maxStampLocationLen {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	programOther := name
+
+	rule := trimOptional(body.Rule, maxConditionDescriptionLen)
+	if body.Rule != nil && rule == nil && strings.TrimSpace(*body.Rule) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	floor := trimOptional(body.Location, maxStampLocationLen)
+	if body.Location != nil && floor == nil && strings.TrimSpace(*body.Location) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	if h.profiles != nil {
+		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
+			slog.Error("ensure profile before reserved correction failed", "user_id", claims.Sub, "error", err)
+			wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+				HTTPStatus: http.StatusInternalServerError,
+				Code:       app.CodeInternalError,
+				Message:    app.MessageInternalError,
+			})
+			return
+		}
+	}
+
+	updated, firstCorrection, err := h.repo.UpdateReserved(c.Request.Context(), id, UpdateReservedInput{
+		ReservationType: reservationType,
+		ProgramOther:    &programOther,
+		Conditions:      rule,
+		Floor:           floor,
+		ChangedBy:       claims.Sub,
+	})
+	if err != nil {
+		slog.Error("update reserved failed", "reserved_id", id, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if updated == nil {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusNotFound,
+			Code:       app.CodeNotFound,
+			Message:    app.MessageNotFound,
+		})
+		return
+	}
+
+	pointsAwarded := 0
+	if firstCorrection && h.profiles != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+			slog.Error("award reserved correction points failed", "user_id", claims.Sub, "error", err)
+		} else {
+			pointsAwarded = points.PrivilegeCorrection
+		}
+	}
+
+	wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data: &ReservedCorrectionResult{
+			Reserved:      *updated,
+			PointsAwarded: pointsAwarded,
+		},
+	})
+}
+
+func mapReserveCategoryToReservationType(category string) (string, bool) {
+	switch strings.ToUpper(strings.TrimSpace(category)) {
+	case "CREDITCARD_HOLDERS":
+		return "cardholder", true
+	case "CORPORATE":
+		return "tenant", true
+	case "MEMBERSHIP":
+		return "other", true
+	default:
+		return "", false
+	}
+}
+
 func trimOptional(value *string, maxLen int) *string {
 	if value == nil {
 		return nil

@@ -147,6 +147,12 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler, verifier
 	{
 		privilegeWrites.PATCH("", placesHandler.UpdateStamp)
 	}
+
+	reserveWrites := r.Group("/api/v1/privileges/reserve/:id")
+	reserveWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		reserveWrites.PATCH("", placesHandler.UpdateReserved)
+	}
 }
 
 func registerReviewsRoutes(r *gin.Engine, reviewsHandler *reviews.Handler, verifier *supabaseauth.Verifier) {

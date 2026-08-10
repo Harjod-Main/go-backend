@@ -108,6 +108,19 @@ type StampCorrectionResult struct {
 	PointsAwarded int        `json:"points_awarded"`
 }
 
+type UpdateReservedInput struct {
+	ReservationType string
+	ProgramOther    *string
+	Conditions      *string
+	Floor           *string
+	ChangedBy       string
+}
+
+type ReservedCorrectionResult struct {
+	Reserved      Reserved `json:"reserved"`
+	PointsAwarded int      `json:"points_awarded"`
+}
+
 type Program struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider"`

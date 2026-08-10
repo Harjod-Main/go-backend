@@ -13,6 +13,7 @@ type Repository interface {
 	GetValidation(ctx context.Context, validationID string) (*Validation, error)
 	UpdateValidation(ctx context.Context, validationID string, in UpdateValidationInput) (*Validation, bool, error)
 	GetReserved(ctx context.Context, reservedID string) (*Reserved, error)
+	UpdateReserved(ctx context.Context, reservedID string, in UpdateReservedInput) (*Reserved, bool, error)
 	GetEVCharger(ctx context.Context, evChargerID string) (*EVCharger, error)
 	PlaceExists(ctx context.Context, placeID string) (bool, error)
 	GetPlaceReaction(ctx context.Context, placeID, userID string) (*PlaceReactionResponse, error)

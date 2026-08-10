@@ -208,3 +208,54 @@ func TestUpdateStamp_Unauthorized(t *testing.T) {
 
 	r.Equal(http.StatusUnauthorized, w.Code)
 }
+
+func TestUpdateReserved_Success(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	reservedID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	location := "1st Floor"
+	rule := "2 hrs limit then will charge"
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo: &stubRepo{
+			reserved: &places.Reserved{
+				ReservedID:      reservedID,
+				ReservationType: "cardholder",
+			},
+			firstCorrection: true,
+		},
+		Profiles: &stubProfiles{total: 10},
+	})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/reserve/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateReserved(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"category": "CREDITCARD_HOLDERS",
+		"name":     "SCB M Visa Card",
+		"rule":     rule,
+		"location": location,
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/privileges/reserve/"+reservedID, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+
+	var body struct {
+		Data places.ReservedCorrectionResult `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal("cardholder", body.Data.Reserved.ReservationType)
+	r.Equal("SCB M Visa Card", *body.Data.Reserved.ProgramOther)
+	r.Equal(rule, *body.Data.Reserved.Conditions)
+	r.Equal(location, *body.Data.Reserved.Floor)
+	r.Equal(10, body.Data.PointsAwarded)
+}

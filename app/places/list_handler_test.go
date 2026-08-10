@@ -118,6 +118,26 @@ func (s *stubRepo) GetReserved(context.Context, string) (*places.Reserved, error
 	return s.reserved, nil
 }
 
+func (s *stubRepo) UpdateReserved(
+	_ context.Context,
+	_ string,
+	in places.UpdateReservedInput,
+) (*places.Reserved, bool, error) {
+	if s.updateErr != nil {
+		return nil, false, s.updateErr
+	}
+	if s.reserved == nil {
+		return nil, false, nil
+	}
+	updated := *s.reserved
+	updated.ReservationType = in.ReservationType
+	updated.ProgramOther = in.ProgramOther
+	updated.Conditions = in.Conditions
+	updated.Floor = in.Floor
+	updated.Program = nil
+	return &updated, s.firstCorrection, nil
+}
+
 func (s *stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, error) {
 	if s.detailErr != nil {
 		return nil, s.detailErr
