@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/submissions"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -616,6 +617,287 @@ func (r *postgresRepo) UpdateReserved(
 	return updated, !alreadyCorrected, nil
 }
 
+const getRateIDSQL = `
+SELECT r.rate_id::text
+FROM rate r
+INNER JOIN parking_area pa ON pa.parking_area_id = r.parking_area_id
+WHERE pa.place_id = $1::uuid
+ORDER BY pa.parking_area_id
+LIMIT 1
+`
+
+const updateRateSQL = `
+UPDATE rate
+SET free_minutes = $2,
+    lost_ticket_fee = $3,
+    night_rate = $4,
+    notes = $5
+WHERE rate_id = $1::uuid
+`
+
+const deleteRateTiersSQL = `
+DELETE FROM rate_tier
+WHERE rate_id = $1::uuid
+`
+
+const insertRateTierSQL = `
+INSERT INTO rate_tier (
+	rate_id, tier_order, price, unit, from_hour, to_hour
+) VALUES (
+	$1::uuid, $2, $3, $4::rate_unit_enum, $5, $6
+)
+`
+
+const hasRateCorrectionSQL = `
+SELECT EXISTS(
+  SELECT 1 FROM audit_log
+  WHERE entity_type = 'rate'
+    AND entity_id = $1
+    AND action = 'correct'
+    AND changed_by = $2
+)
+`
+
+const insertRateAuditSQL = `
+INSERT INTO audit_log (entity_type, entity_id, action, old_data, changed_by, created_at)
+VALUES ('rate', $1, 'correct', $2::jsonb, $3, NOW())
+`
+
+func (r *postgresRepo) UpdateRate(
+	ctx context.Context,
+	placeID string,
+	in UpdateRateInput,
+) (*PlaceRateDetail, bool, error) {
+	existing, err := r.GetPlaceRate(ctx, placeID)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing == nil {
+		return nil, false, nil
+	}
+
+	var rateID string
+	if err := r.pool.QueryRow(ctx, getRateIDSQL, placeID).Scan(&rateID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("lookup rate id: %w", err)
+	}
+
+	oldData, err := json.Marshal(existing)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode rate audit: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin rate update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var freeMinutes any = nil
+	if in.FreeMinutes != nil {
+		freeMinutes = *in.FreeMinutes
+	}
+	var lostTicketFee any = nil
+	if in.LostTicketFee != nil {
+		lostTicketFee = *in.LostTicketFee
+	}
+	var overnightFee any = nil
+	if in.OvernightFee != nil {
+		overnightFee = *in.OvernightFee
+	}
+	var notes any = nil
+	if in.Notes != nil {
+		notes = *in.Notes
+	}
+
+	tag, err := tx.Exec(ctx, updateRateSQL,
+		rateID,
+		freeMinutes,
+		lostTicketFee,
+		overnightFee,
+		notes,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("update rate: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, nil
+	}
+
+	if _, err := tx.Exec(ctx, deleteRateTiersSQL, rateID); err != nil {
+		return nil, false, fmt.Errorf("delete rate tiers: %w", err)
+	}
+
+	for i, tier := range in.RateTiers {
+		var toHour any = nil
+		if tier.ToHour != nil {
+			toHour = *tier.ToHour
+		}
+		if _, err := tx.Exec(ctx, insertRateTierSQL,
+			rateID,
+			i+1,
+			tier.Price,
+			tier.Unit,
+			tier.FromHour,
+			toHour,
+		); err != nil {
+			return nil, false, fmt.Errorf("insert rate tier: %w", err)
+		}
+	}
+
+	var alreadyCorrected bool
+	if err := tx.QueryRow(ctx, hasRateCorrectionSQL, rateID, in.ChangedBy).Scan(&alreadyCorrected); err != nil {
+		return nil, false, fmt.Errorf("check rate correction: %w", err)
+	}
+
+	// Audit after successful change, but before commit — same semantics as
+	// UpdateValidation/UpdateReserved.
+	if _, err := tx.Exec(ctx, insertRateAuditSQL, rateID, string(oldData), in.ChangedBy); err != nil {
+		return nil, false, fmt.Errorf("insert rate audit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit rate update: %w", err)
+	}
+
+	updated, err := r.GetPlaceRate(ctx, placeID)
+	if err != nil {
+		return nil, false, err
+	}
+	return updated, !alreadyCorrected, nil
+}
+
+const getParkingAreaAmenitiesSQL = `
+SELECT
+	pa.parking_area_id::text,
+	pa.total_spaces,
+	pa.has_ev_charging,
+	pa.has_cover,
+	pa.has_valet,
+	pa.transit_access,
+	pa.transit_access_type
+FROM parking_area pa
+WHERE pa.place_id = $1::uuid
+ORDER BY pa.parking_area_id
+LIMIT 1
+`
+
+type parkingAreaAmenitiesRow struct {
+	ParkingAreaID     string
+	TotalSpaces       *int
+	HasEVCharging     *bool
+	HasCover          *bool
+	HasValet          *bool
+	TransitAccess     *bool
+	TransitAccessType *string
+}
+
+const updateParkingAreaAmenitiesSQL = `
+UPDATE parking_area
+SET
+	has_ev_charging = $2,
+	has_cover = $3,
+	has_valet = $4,
+	total_spaces = $5,
+	transit_access = $6,
+	transit_access_type = $7
+WHERE parking_area_id = $1::uuid
+`
+
+const hasParkingAreaAmenitiesCorrectionSQL = `
+SELECT EXISTS(
+  SELECT 1 FROM audit_log
+  WHERE entity_type = 'parking_area'
+    AND entity_id = $1
+    AND action = 'correct'
+    AND changed_by = $2
+)
+`
+
+const insertParkingAreaAmenitiesAuditSQL = `
+INSERT INTO audit_log (entity_type, entity_id, action, old_data, changed_by, created_at)
+VALUES ('parking_area', $1, 'correct', $2::jsonb, $3, NOW())
+`
+
+func (r *postgresRepo) UpdateParkingAmenities(
+	ctx context.Context,
+	placeID string,
+	in UpdateParkingAmenitiesInput,
+) (*ParkingAmenitiesCorrectionResult, bool, error) {
+	var row parkingAreaAmenitiesRow
+	if err := r.pool.QueryRow(ctx, getParkingAreaAmenitiesSQL, placeID).Scan(
+		&row.ParkingAreaID,
+		&row.TotalSpaces,
+		&row.HasEVCharging,
+		&row.HasCover,
+		&row.HasValet,
+		&row.TransitAccess,
+		&row.TransitAccessType,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("get parking area amenities: %w", err)
+	}
+
+	oldData, err := json.Marshal(row)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode parking area amenities audit: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin parking amenities update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	alreadyCorrected := false
+	if err := tx.QueryRow(ctx, hasParkingAreaAmenitiesCorrectionSQL, row.ParkingAreaID, in.ChangedBy).Scan(&alreadyCorrected); err != nil {
+		return nil, false, fmt.Errorf("check parking amenities correction: %w", err)
+	}
+
+	// Normalize values: parking_area columns are non-null in practice, but use
+	// null-safe pointers to match existing schema.
+	hasEV := in.HasEvCharging
+	hasCover := in.HasCover
+	hasValet := in.HasValet
+	transitAccess := in.TransitAccess
+	transitType := any(in.TransitAccessType)
+
+	tag, err := tx.Exec(ctx, updateParkingAreaAmenitiesSQL,
+		row.ParkingAreaID,
+		hasEV,
+		hasCover,
+		hasValet,
+		in.TotalSpaces,
+		transitAccess,
+		transitType,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("update parking amenities: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, nil
+	}
+
+	if _, err := tx.Exec(ctx, insertParkingAreaAmenitiesAuditSQL,
+		row.ParkingAreaID,
+		string(oldData),
+		in.ChangedBy,
+	); err != nil {
+		return nil, false, fmt.Errorf("insert parking amenities audit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit parking amenities update: %w", err)
+	}
+
+	// No updated value needed for the client; only points + firstCorrection.
+	return &ParkingAmenitiesCorrectionResult{}, !alreadyCorrected, nil
+}
+
 const getEVChargerSQL = `
 SELECT json_build_object(
 	'ev_charger_id', ev.ev_charger_id::text,
@@ -641,6 +923,43 @@ WHERE ev.ev_charger_id = $1::uuid
 
 func (r *postgresRepo) GetEVCharger(ctx context.Context, evChargerID string) (*EVCharger, error) {
 	return scanJSON[EVCharger](ctx, r.pool, getEVChargerSQL, evChargerID, "ev charger")
+}
+
+const getParkingAreaForPlaceSQL = `
+SELECT parking_area_id::text, latitude::float8, longitude::float8
+FROM parking_area
+WHERE place_id = $1::uuid
+ORDER BY parking_area_id
+LIMIT 1
+`
+
+func (r *postgresRepo) GetParkingAreaForPlace(ctx context.Context, placeID string) (*ParkingAreaRef, error) {
+	var out ParkingAreaRef
+	err := r.pool.QueryRow(ctx, getParkingAreaForPlaceSQL, placeID).Scan(
+		&out.ParkingAreaID,
+		&out.Latitude,
+		&out.Longitude,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get parking area for place: %w", err)
+	}
+	return &out, nil
+}
+
+func (r *postgresRepo) CreatePrivilege(ctx context.Context, in CreatePrivilegeInput) error {
+	userID := in.UserID
+	return submissions.ContributePrivilege(ctx, r.pool, submissions.ContributeInput{
+		PlaceID:       in.PlaceID,
+		ParkingAreaID: in.ParkingAreaID,
+		Latitude:      in.Latitude,
+		Longitude:     in.Longitude,
+		UserID:        &userID,
+		Kind:          in.Kind,
+		Value:         in.Value,
+	})
 }
 
 func (r *postgresRepo) PlaceExists(ctx context.Context, placeID string) (bool, error) {

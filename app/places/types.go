@@ -1,5 +1,7 @@
 package places
 
+import "encoding/json"
+
 // Place is the map-list payload shape (compatible with frontend PlaceRow / PostgREST).
 type Place struct {
 	PlaceID     string        `json:"place_id"`
@@ -121,6 +123,41 @@ type ReservedCorrectionResult struct {
 	PointsAwarded int      `json:"points_awarded"`
 }
 
+type UpdateRateInput struct {
+	FreeMinutes      *int
+	LostTicketFee    *float64
+	OvernightFee     *float64
+	Notes            *string
+	RateTiers        []RateTierDraft
+	ChangedBy        string
+}
+
+type RateTierDraft struct {
+	FromHour float64
+	ToHour   *float64
+	Price    float64
+	Unit     string
+}
+
+type RateCorrectionResult struct {
+	Rate          PlaceRateDetail `json:"rate"`
+	PointsAwarded int             `json:"points_awarded"`
+}
+
+type UpdateParkingAmenitiesInput struct {
+	HasCover         bool
+	HasEvCharging    bool
+	HasValet         bool
+	TotalSpaces      *int
+	TransitAccess    bool
+	TransitAccessType *string
+	ChangedBy        string
+}
+
+type ParkingAmenitiesCorrectionResult struct {
+	PointsAwarded int `json:"points_awarded"`
+}
+
 type Program struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
@@ -130,6 +167,22 @@ type Program struct {
 type PrivilegeArea struct {
 	Reserved  []Reserved  `json:"reserved"`
 	EVCharger []EVCharger `json:"ev_charger"`
+}
+
+type ParkingAreaRef struct {
+	ParkingAreaID string
+	Latitude      float64
+	Longitude     float64
+}
+
+type CreatePrivilegeInput struct {
+	PlaceID       string
+	ParkingAreaID string
+	Latitude      float64
+	Longitude     float64
+	UserID        string
+	Kind          string
+	Value         json.RawMessage
 }
 
 type Reserved struct {

@@ -21,6 +21,8 @@ type stubRepo struct {
 	err               error
 	listCalls         atomic.Int32
 	rate              *places.PlaceRateDetail
+	updatedRate       *places.PlaceRateDetail
+	amenities         *places.ParkingAmenitiesCorrectionResult
 	rates             map[string]*places.PlaceRateDetail
 	rateErr           error
 	ratesCalls        atomic.Int32
@@ -51,6 +53,34 @@ func (s *stubRepo) GetPlaceRate(_ context.Context, placeID string) (*places.Plac
 		return s.rates[placeID], nil
 	}
 	return s.rate, nil
+}
+
+func (s *stubRepo) UpdateRate(_ context.Context, _ string, _ places.UpdateRateInput) (*places.PlaceRateDetail, bool, error) {
+	if s.updateErr != nil {
+		return nil, false, s.updateErr
+	}
+	if s.rate == nil {
+		return nil, false, nil
+	}
+	updated := s.rate
+	if s.updatedRate != nil {
+		updated = s.updatedRate
+	}
+	return updated, s.firstCorrection, nil
+}
+
+func (s *stubRepo) UpdateParkingAmenities(
+	_ context.Context,
+	_ string,
+	_ places.UpdateParkingAmenitiesInput,
+) (*places.ParkingAmenitiesCorrectionResult, bool, error) {
+	if s.detailErr != nil {
+		return nil, false, s.detailErr
+	}
+	if s.amenities == nil {
+		return nil, false, nil
+	}
+	return s.amenities, s.firstCorrection, nil
 }
 
 func (s *stubRepo) GetPlaceRates(_ context.Context, placeIDs []string) (map[string]*places.PlaceRateDetail, error) {
@@ -143,6 +173,18 @@ func (s *stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, err
 		return nil, s.detailErr
 	}
 	return s.evCharger, nil
+}
+
+func (s *stubRepo) GetParkingAreaForPlace(context.Context, string) (*places.ParkingAreaRef, error) {
+	return &places.ParkingAreaRef{
+		ParkingAreaID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+		Latitude:      13.7,
+		Longitude:     100.5,
+	}, nil
+}
+
+func (s *stubRepo) CreatePrivilege(context.Context, places.CreatePrivilegeInput) error {
+	return nil
 }
 
 func (s *stubRepo) PlaceExists(context.Context, string) (bool, error) {

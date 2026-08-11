@@ -3,10 +3,12 @@ package submissions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,9 +56,9 @@ VALUES ($1::uuid, $2::day_of_week_enum, $3::time, $4::time, $5)
 
 const insertRateSQL = `
 INSERT INTO rate (
-	name_en, parking_area_id, free_minutes, lost_ticket_fee, night_rate, currency
+	name_en, parking_area_id, free_minutes, lost_ticket_fee, night_rate, currency, notes
 ) VALUES (
-	$1, $2::uuid, $3, $4, $5, 'THB'
+	$1, $2::uuid, $3, $4, $5, 'THB', $6
 )
 RETURNING rate_id::text
 `
@@ -66,12 +68,90 @@ INSERT INTO rate_tier (rate_id, tier_order, price, unit, from_hour, to_hour)
 VALUES ($1::uuid, $2, $3, $4::rate_unit_enum, $5, $6)
 `
 
-const insertPlaceImageSQL = `
+const insertEntityImageSQL = `
 INSERT INTO place_images (
 	entity_type, entity_id, storage_path, is_primary, is_verified, uploaded_by
 ) VALUES (
-	'place', $1, $2, $3, false, $4::uuid
+	$1, $2, $3, $4, false, $5::uuid
 )
+`
+
+const insertProgramSQL = `
+INSERT INTO program (name, provider, category)
+VALUES ($1, $2, $3::program_category_enum)
+RETURNING program_id::text
+`
+
+const findProgramSQL = `
+SELECT program_id::text
+FROM program
+WHERE name = $1 AND provider = $2 AND category = $3::program_category_enum
+LIMIT 1
+`
+
+const insertValidationSQL = `
+INSERT INTO validation (
+	validation_type, program_id, program_other, condition_description, validation_location, notes
+) VALUES (
+	$1::validation_type_enum, $2::uuid, $3, $4, $5, $6
+)
+RETURNING validation_id::text
+`
+
+const insertValidationParkingSQL = `
+INSERT INTO validation_parking (validation_id, place_id)
+VALUES ($1::uuid, $2::uuid)
+`
+
+const insertValidationTierSQL = `
+INSERT INTO validation_tier (validation_id, tier_order, min_spend, free_minutes)
+VALUES ($1::uuid, $2, $3, $4)
+`
+
+const insertReservedSQL = `
+INSERT INTO reserved (
+	parking_area_id, reservation_type, program_other, conditions, floor, spots_count
+) VALUES (
+	$1::uuid, $2::reservation_type_enum, $3, $4, $5, 1
+)
+RETURNING reserved_id::text
+`
+
+const findEVProviderSQL = `
+SELECT ev_provider_id::text
+FROM ev_provider
+WHERE name = $1
+LIMIT 1
+`
+
+const insertEVProviderSQL = `
+INSERT INTO ev_provider (name)
+VALUES ($1)
+RETURNING ev_provider_id::text
+`
+
+const insertEVChargerSQL = `
+INSERT INTO ev_charger (
+	place_id, parking_area_id, ev_provider_id, floor, latitude, longitude, geom
+) VALUES (
+	$1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+	ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography
+)
+RETURNING ev_charger_id::text
+`
+
+const insertEVConnectorSQL = `
+INSERT INTO ev_connector (
+	ev_charger_id, connector_type, power_type, power_kw, is_operational
+) VALUES (
+	$1::uuid, $2::connector_type_enum, $3::power_type_enum, $4, true
+)
+`
+
+const markParkingAreaHasEVSQL = `
+UPDATE parking_area
+SET has_ev_charging = true
+WHERE parking_area_id = $1::uuid
 `
 
 const insertSubmissionSQL = `
@@ -202,6 +282,7 @@ func (r *postgresRepo) Create(ctx context.Context, s *Submission) error {
 		freeMinutes,
 		lostTicket,
 		nightRate,
+		joinSpecialConditions(special),
 	).Scan(&rateID); err != nil {
 		return fmt.Errorf("insert rate: %w", err)
 	}
@@ -219,18 +300,29 @@ func (r *postgresRepo) Create(ctx context.Context, s *Submission) error {
 		}
 	}
 
-	for i, photoURL := range photos {
-		trimmed := strings.TrimSpace(photoURL)
-		if trimmed == "" {
-			continue
-		}
-		if _, err := tx.Exec(ctx, insertPlaceImageSQL,
-			placeID,
-			trimmed,
-			i == 0,
-			s.UserID,
-		); err != nil {
-			return fmt.Errorf("insert place image: %w", err)
+	if err := insertEntityImages(ctx, tx, "place", placeID, photos, s.UserID); err != nil {
+		return err
+	}
+	if err := insertEntityImages(ctx, tx, "rate", rateID, ratePhotos, s.UserID); err != nil {
+		return err
+	}
+
+	stampsPublished := parseStampEntries(stamps)
+	reservedPublished := parseReservedEntries(reserved)
+	evPublished := parseEVEntries(ev)
+
+	if err := publishStamps(ctx, tx, placeID, s.UserID, stampsPublished); err != nil {
+		return err
+	}
+	if err := publishReserved(ctx, tx, parkingAreaID, s.UserID, reservedPublished); err != nil {
+		return err
+	}
+	if err := publishEVCharges(ctx, tx, placeID, parkingAreaID, s.Latitude, s.Longitude, s.UserID, evPublished); err != nil {
+		return err
+	}
+	if len(evPublished) > 0 || hasEV {
+		if _, err := tx.Exec(ctx, markParkingAreaHasEVSQL, parkingAreaID); err != nil {
+			return fmt.Errorf("mark parking area has EV: %w", err)
 		}
 	}
 
@@ -305,4 +397,192 @@ func nullIfEmptyPtr(value *string) any {
 		return nil
 	}
 	return *value
+}
+
+func insertEntityImages(
+	ctx context.Context,
+	tx pgx.Tx,
+	entityType string,
+	entityID string,
+	urls []string,
+	uploadedBy *string,
+) error {
+	for i, photoURL := range urls {
+		trimmed := strings.TrimSpace(photoURL)
+		if trimmed == "" {
+			continue
+		}
+		if _, err := tx.Exec(ctx, insertEntityImageSQL,
+			entityType,
+			entityID,
+			trimmed,
+			i == 0,
+			uploadedBy,
+		); err != nil {
+			return fmt.Errorf("insert %s image: %w", entityType, err)
+		}
+	}
+	return nil
+}
+
+func ensureProgramID(
+	ctx context.Context,
+	tx pgx.Tx,
+	name string,
+	provider string,
+	category string,
+) (string, error) {
+	var programID string
+	err := tx.QueryRow(ctx, findProgramSQL, name, provider, category).Scan(&programID)
+	if err == nil {
+		return programID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("find program: %w", err)
+	}
+	if err := tx.QueryRow(ctx, insertProgramSQL, name, provider, category).Scan(&programID); err != nil {
+		return "", fmt.Errorf("insert program: %w", err)
+	}
+	return programID, nil
+}
+
+func ensureEVProviderID(ctx context.Context, tx pgx.Tx, name string) (string, error) {
+	var providerID string
+	err := tx.QueryRow(ctx, findEVProviderSQL, name).Scan(&providerID)
+	if err == nil {
+		return providerID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("find ev provider: %w", err)
+	}
+	if err := tx.QueryRow(ctx, insertEVProviderSQL, name).Scan(&providerID); err != nil {
+		return "", fmt.Errorf("insert ev provider: %w", err)
+	}
+	return providerID, nil
+}
+
+func publishStamps(
+	ctx context.Context,
+	tx pgx.Tx,
+	placeID string,
+	uploadedBy *string,
+	stamps []publishedStamp,
+) error {
+	for _, stamp := range stamps {
+		var programID any
+		if stamp.ProgramName != nil && stamp.ProgramProvider != nil && stamp.ProgramCategory != nil {
+			id, err := ensureProgramID(ctx, tx, *stamp.ProgramName, *stamp.ProgramProvider, *stamp.ProgramCategory)
+			if err != nil {
+				return err
+			}
+			programID = id
+		}
+
+		var validationID string
+		if err := tx.QueryRow(ctx, insertValidationSQL,
+			stamp.ValidationType,
+			programID,
+			stamp.ProgramOther,
+			stamp.ConditionDescription,
+			stamp.ValidationLocation,
+			stamp.Notes,
+		).Scan(&validationID); err != nil {
+			return fmt.Errorf("insert validation: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, insertValidationParkingSQL, validationID, placeID); err != nil {
+			return fmt.Errorf("insert validation_parking: %w", err)
+		}
+
+		if stamp.FreeMinutes != nil || stamp.MinSpend > 0 {
+			freeMinutes := 0
+			if stamp.FreeMinutes != nil {
+				freeMinutes = *stamp.FreeMinutes
+			}
+			if _, err := tx.Exec(ctx, insertValidationTierSQL,
+				validationID,
+				1,
+				stamp.MinSpend,
+				freeMinutes,
+			); err != nil {
+				return fmt.Errorf("insert validation_tier: %w", err)
+			}
+		}
+
+		if err := insertEntityImages(ctx, tx, "validation", validationID, stamp.SignagePhotos, uploadedBy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func publishReserved(
+	ctx context.Context,
+	tx pgx.Tx,
+	parkingAreaID string,
+	uploadedBy *string,
+	items []publishedReserved,
+) error {
+	for _, item := range items {
+		var reservedID string
+		if err := tx.QueryRow(ctx, insertReservedSQL,
+			parkingAreaID,
+			item.ReservationType,
+			item.ProgramOther,
+			item.Conditions,
+			item.Floor,
+		).Scan(&reservedID); err != nil {
+			return fmt.Errorf("insert reserved: %w", err)
+		}
+		if err := insertEntityImages(ctx, tx, "reserved", reservedID, item.SignagePhotos, uploadedBy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func publishEVCharges(
+	ctx context.Context,
+	tx pgx.Tx,
+	placeID string,
+	parkingAreaID string,
+	latitude float64,
+	longitude float64,
+	uploadedBy *string,
+	items []publishedEV,
+) error {
+	for _, item := range items {
+		providerID, err := ensureEVProviderID(ctx, tx, item.ProviderName)
+		if err != nil {
+			return err
+		}
+
+		var chargerID string
+		if err := tx.QueryRow(ctx, insertEVChargerSQL,
+			placeID,
+			parkingAreaID,
+			providerID,
+			item.Floor,
+			latitude,
+			longitude,
+		).Scan(&chargerID); err != nil {
+			return fmt.Errorf("insert ev charger: %w", err)
+		}
+
+		for _, connector := range item.Connectors {
+			if _, err := tx.Exec(ctx, insertEVConnectorSQL,
+				chargerID,
+				connector.ConnectorType,
+				connector.PowerType,
+				connector.PowerKW,
+			); err != nil {
+				return fmt.Errorf("insert ev connector: %w", err)
+			}
+		}
+
+		if err := insertEntityImages(ctx, tx, "ev_charger", chargerID, item.SignagePhotos, uploadedBy); err != nil {
+			return err
+		}
+	}
+	return nil
 }

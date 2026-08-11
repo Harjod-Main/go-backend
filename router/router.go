@@ -125,11 +125,29 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler, verifier
 		placesGroup.GET("/:placeId/reaction", supabaseauth.OptionalMiddleware(verifier), placesHandler.GetReaction)
 	}
 
+	rateWrites := r.Group("/api/v1/places/:placeId/rate")
+	rateWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		rateWrites.PATCH("", placesHandler.UpdateRate)
+	}
+
 	placeReactionWrites := r.Group("/api/v1/places/:placeId/reaction")
 	placeReactionWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
 	{
 		placeReactionWrites.PUT("", placesHandler.SetReaction)
 		placeReactionWrites.DELETE("", placesHandler.ClearReaction)
+	}
+
+	placePrivilegeWrites := r.Group("/api/v1/places/:placeId/privileges")
+	placePrivilegeWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		placePrivilegeWrites.POST("", placesHandler.CreatePrivilege)
+	}
+
+	amenitiesWrites := r.Group("/api/v1/places/:placeId/amenities")
+	amenitiesWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		amenitiesWrites.PATCH("", placesHandler.UpdateParkingAmenities)
 	}
 
 	// Public batch quote reads can fan out into heavy DB work, so keep them on the

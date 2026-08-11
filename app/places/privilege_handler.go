@@ -1,6 +1,7 @@
 package places
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -432,6 +433,130 @@ func mapReserveCategoryToReservationType(category string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+type createPrivilegeRequest struct {
+	Kind  string          `json:"kind"`
+	Value json.RawMessage `json:"value"`
+}
+
+// CreatePrivilege handles POST /api/v1/places/:placeId/privileges (auth required).
+func (h *Handler) CreatePrivilege(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	placeID := strings.TrimSpace(c.Param("placeId"))
+	if _, err := uuid.Parse(placeID); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxStampCorrectionBodyBytes)
+	var body createPrivilegeRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(body.Kind))
+	if kind != "stamp" && kind != "reserve" && kind != "ev" {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	if len(body.Value) == 0 || string(body.Value) == "null" {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	area, err := h.repo.GetParkingAreaForPlace(c.Request.Context(), placeID)
+	if err != nil {
+		slog.Error("lookup parking area for privilege create failed", "place_id", placeID, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if area == nil {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusNotFound,
+			Code:       app.CodeNotFound,
+			Message:    app.MessageNotFound,
+		})
+		return
+	}
+
+	if h.profiles != nil {
+		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
+			slog.Error("ensure profile before privilege create failed", "user_id", claims.Sub, "error", err)
+			wrapper.Respond(c, wrapper.ResponseOption[any]{
+				HTTPStatus: http.StatusInternalServerError,
+				Code:       app.CodeInternalError,
+				Message:    app.MessageInternalError,
+			})
+			return
+		}
+	}
+
+	if err := h.repo.CreatePrivilege(c.Request.Context(), CreatePrivilegeInput{
+		PlaceID:       placeID,
+		ParkingAreaID: area.ParkingAreaID,
+		Latitude:      area.Latitude,
+		Longitude:     area.Longitude,
+		UserID:        claims.Sub,
+		Kind:          kind,
+		Value:         body.Value,
+	}); err != nil {
+		slog.Error("create privilege failed", "place_id", placeID, "kind", kind, "error", err)
+		msg := err.Error()
+		if strings.Contains(msg, "invalid ") || strings.Contains(msg, "unsupported ") || strings.Contains(msg, "missing ") {
+			wrapper.Respond(c, wrapper.ResponseOption[any]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
+		}
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+
+	created := map[string]bool{"created": true}
+	wrapper.Respond(c, wrapper.ResponseOption[map[string]bool]{
+		HTTPStatus: http.StatusCreated,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data:       &created,
+	})
 }
 
 func trimOptional(value *string, maxLen int) *string {
