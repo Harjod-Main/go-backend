@@ -2,12 +2,14 @@ package places
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/points"
+	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -551,6 +553,21 @@ func (h *Handler) CreatePrivilege(c *gin.Context) {
 	}
 
 	created := map[string]bool{"created": true}
+
+	if h.notificationsSender != nil {
+		_ = h.notificationsSender.SendToUser(
+			c.Request.Context(),
+			claims.Sub,
+			notifications.NotificationEvent{
+				Type:    "contribute",
+				PlaceID: placeID,
+				Title:   "Thanks for your contribution",
+				Body:    "Your parking privileges are now visible on the map.",
+				URL:     fmt.Sprintf("/map?placeId=%s", placeID),
+			},
+		)
+	}
+
 	wrapper.Respond(c, wrapper.ResponseOption[map[string]bool]{
 		HTTPStatus: http.StatusCreated,
 		Code:       app.CodeSuccess,

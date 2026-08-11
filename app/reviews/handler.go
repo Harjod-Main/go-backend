@@ -2,11 +2,13 @@ package reviews
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/points"
@@ -25,15 +27,21 @@ const (
 type HandlerConfig struct {
 	Repo     Repository
 	Profiles profile.Repository
+	NotificationsSender *notifications.Sender
 }
 
 type Handler struct {
 	repo     Repository
 	profiles profile.Repository
+	notificationsSender *notifications.Sender
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
-	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
+	return &Handler{
+		repo:                 cfg.Repo,
+		profiles:            cfg.Profiles,
+		notificationsSender: cfg.NotificationsSender,
+	}
 }
 
 // ListByPlace handles GET /api/v1/places/:placeId/reviews?limit=&cursor=
@@ -259,6 +267,21 @@ func (h *Handler) Create(c *gin.Context) {
 			// Review is already persisted; log and continue so the user still gets their review.
 			slog.Error("award review points failed", "user_id", claims.Sub, "error", err)
 		}
+	}
+
+	if h.notificationsSender != nil {
+		_ = h.notificationsSender.SendToUser(
+			c.Request.Context(),
+			claims.Sub,
+			notifications.NotificationEvent{
+				Type:          "review",
+				PlaceID:       placeID,
+				Title:         "Review submitted",
+				Body:          fmt.Sprintf("You earned +%d points.", points.ReviewCreate),
+				URL:           fmt.Sprintf("/reviews?parkingId=%s", placeID),
+				PointsAwarded: points.ReviewCreate,
+			},
+		)
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[Review]{

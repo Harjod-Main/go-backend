@@ -8,6 +8,7 @@ import (
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/checkins"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-backend/app/reports"
@@ -57,17 +58,23 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		return nil, nil, err
 	}
 	mediaurl.Configure(cfg.Supabase.ProjectURL)
+
+	notificationsRepo := notifications.NewPostgresRepo(pool)
+	notificationsSender := notifications.NewSender(notificationsRepo)
+
 	profileRepo := profile.NewPostgresRepo(pool)
 	placesHandler := places.NewHandler(places.HandlerConfig{
-		Repo:     places.NewPostgresRepo(pool),
-		Google:   places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
-		Profiles: profileRepo,
+		Repo:                   places.NewPostgresRepo(pool),
+		Google:                 places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
+		Profiles:               profileRepo,
+		NotificationsSender:    notificationsSender,
 	})
 
 	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 	reviewsHandler := reviews.NewHandler(reviews.HandlerConfig{
-		Repo:     reviews.NewPostgresRepo(pool),
-		Profiles: profileRepo,
+		Repo:                  reviews.NewPostgresRepo(pool),
+		Profiles:              profileRepo,
+		NotificationsSender:   notificationsSender,
 	})
 	reportsHandler := reports.NewHandler(reports.HandlerConfig{
 		Repo: reports.NewPostgresRepo(pool),
@@ -84,12 +91,17 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 
 	authHandler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: profileRepo})
 	submissionsHandler := submissions.NewHandler(submissions.HandlerConfig{
-		Repo:     submissions.NewPostgresRepo(pool),
-		Profiles: profileRepo,
+		Repo:                submissions.NewPostgresRepo(pool),
+		Profiles:           profileRepo,
+		NotificationsSender: notificationsSender,
 	})
 	checkinsHandler := checkins.NewHandler(checkins.HandlerConfig{
-		Repo:     checkins.NewPostgresRepo(pool),
-		Profiles: profileRepo,
+		Repo:                  checkins.NewPostgresRepo(pool),
+		Profiles:              profileRepo,
+		NotificationsSender:   notificationsSender,
+	})
+	notificationsHandler := notifications.NewHandler(notifications.HandlerConfig{
+		Repo: notificationsRepo,
 	})
 	registerPlacesRoutes(r, placesHandler, verifier)
 	registerAuthRoutes(r, authHandler, verifier)
@@ -98,6 +110,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	registerProfileRoutes(r, profileHandler, verifier)
 	registerSubmissionsRoutes(r, submissionsHandler, verifier)
 	registerCheckInsRoutes(r, checkinsHandler, verifier)
+	registerNotificationsRoutes(r, notificationsHandler, verifier)
 
 	return r, pool.Close, nil
 }
@@ -242,6 +255,24 @@ func registerSubmissionsRoutes(r *gin.Engine, submissionsHandler *submissions.Ha
 func registerCheckInsRoutes(r *gin.Engine, checkinsHandler *checkins.Handler, verifier *supabaseauth.Verifier) {
 	r.GET("/api/v1/me/check-ins", supabaseauth.Middleware(verifier), checkinsHandler.ListMine)
 	r.POST("/api/v1/places/:placeId/check-ins", supabaseauth.Middleware(verifier), checkinsHandler.Create)
+}
+
+func registerNotificationsRoutes(r *gin.Engine, notificationsHandler *notifications.Handler, verifier *supabaseauth.Verifier) {
+	meGroup := r.Group("/api/v1/me")
+	meGroup.Use(supabaseauth.Middleware(verifier))
+	{
+		meGroup.GET("/notification-preferences", notificationsHandler.GetPreferences)
+		meGroup.PATCH("/notification-preferences", notificationsHandler.UpdatePreferences)
+
+		meGroup.POST("/web-push-subscriptions", notificationsHandler.UpsertWebPushSubscription)
+		// Expected path (preferred)
+		meGroup.DELETE("/web-push-subscriptions", notificationsHandler.DeleteWebPushSubscription)
+		// Compatibility with current frontend MVP placeholder call.
+		meGroup.DELETE("/web-push-subscriptions:delete", notificationsHandler.DeleteWebPushSubscriptionCompat)
+
+		meGroup.POST("/ios-push-token", notificationsHandler.UpsertIOSPushToken)
+		meGroup.DELETE("/ios-push-token", notificationsHandler.DeleteIOSPushToken)
+	}
 }
 
 func allowedHeaders(refIDHeaderKey string) []string {

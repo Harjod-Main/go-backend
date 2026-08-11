@@ -2,12 +2,14 @@ package submissions
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/points"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
@@ -34,15 +36,21 @@ const (
 type HandlerConfig struct {
 	Repo     Repository
 	Profiles profile.Repository
+	NotificationsSender *notifications.Sender
 }
 
 type Handler struct {
 	repo     Repository
 	profiles profile.Repository
+	notificationsSender *notifications.Sender
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
-	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
+	return &Handler{
+		repo:                 cfg.Repo,
+		profiles:            cfg.Profiles,
+		notificationsSender: cfg.NotificationsSender,
+	}
 }
 
 // Create handles POST /api/v1/places/submissions (auth required).
@@ -255,6 +263,21 @@ func (h *Handler) Create(c *gin.Context) {
 		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), uid, points.PlaceSubmission); err != nil {
 			slog.Error("award submission points failed", "user_id", uid, "error", err)
 		}
+	}
+
+	if h.notificationsSender != nil {
+		_ = h.notificationsSender.SendToUser(
+			c.Request.Context(),
+			uid,
+			notifications.NotificationEvent{
+				Type:          "submission",
+				PlaceID:       "",
+				Title:         "Submission received",
+				Body:          fmt.Sprintf("You earned +%d points for your submission.", points.PlaceSubmission),
+				URL:           "/map",
+				PointsAwarded: points.PlaceSubmission,
+			},
+		)
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[Submission]{

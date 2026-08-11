@@ -2,12 +2,14 @@ package checkins
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/pagination"
+	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -20,15 +22,21 @@ const maxCheckInCreateBodyBytes = 64 * 1024
 type HandlerConfig struct {
 	Repo     Repository
 	Profiles profile.Repository
+	NotificationsSender *notifications.Sender
 }
 
 type Handler struct {
 	repo     Repository
 	profiles profile.Repository
+	notificationsSender *notifications.Sender
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
-	return &Handler{repo: cfg.Repo, profiles: cfg.Profiles}
+	return &Handler{
+		repo:                  cfg.Repo,
+		profiles:             cfg.Profiles,
+		notificationsSender: cfg.NotificationsSender,
+	}
 }
 
 // ListMine handles GET /api/v1/me/check-ins (auth required).
@@ -180,6 +188,21 @@ func (h *Handler) Create(c *gin.Context) {
 			Message:    app.MessageInternalError,
 		})
 		return
+	}
+
+	if h.notificationsSender != nil {
+		_ = h.notificationsSender.SendToUser(
+			c.Request.Context(),
+			claims.Sub,
+			notifications.NotificationEvent{
+				Type:          "checkin",
+				PlaceID:       placeID,
+				Title:         "Check-in completed",
+				Body:          fmt.Sprintf("You earned %d points.", created.PointsAwarded),
+				URL:           fmt.Sprintf("/map?placeId=%s", placeID),
+				PointsAwarded: created.PointsAwarded,
+			},
+		)
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[CheckIn]{
