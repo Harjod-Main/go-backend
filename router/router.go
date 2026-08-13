@@ -8,6 +8,7 @@ import (
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/checkins"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/mystats"
 	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-backend/app/profile"
@@ -100,6 +101,9 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 		Profiles:              profileRepo,
 		NotificationsSender:   notificationsSender,
 	})
+	mystatsHandler := mystats.NewHandler(mystats.HandlerConfig{
+		Repo: mystats.NewPostgresRepo(pool),
+	})
 	notificationsHandler := notifications.NewHandler(notifications.HandlerConfig{
 		Repo: notificationsRepo,
 	})
@@ -110,6 +114,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	registerProfileRoutes(r, profileHandler, verifier)
 	registerSubmissionsRoutes(r, submissionsHandler, verifier)
 	registerCheckInsRoutes(r, checkinsHandler, verifier)
+	registerMyStatsRoutes(r, mystatsHandler, verifier)
 	registerNotificationsRoutes(r, notificationsHandler, verifier)
 
 	return r, pool.Close, nil
@@ -250,6 +255,10 @@ func registerProfileRoutes(r *gin.Engine, profileHandler *profile.Handler, verif
 func registerSubmissionsRoutes(r *gin.Engine, submissionsHandler *submissions.Handler, verifier *supabaseauth.Verifier) {
 	// Static path registered separately so it does not collide with /places/:placeId/*.
 	r.POST("/api/v1/places/submissions", supabaseauth.Middleware(verifier), submissionsHandler.Create)
+}
+
+func registerMyStatsRoutes(r *gin.Engine, mystatsHandler *mystats.Handler, verifier *supabaseauth.Verifier) {
+	r.GET("/api/v1/me/stats", supabaseauth.Middleware(verifier), mystatsHandler.GetMine)
 }
 
 func registerCheckInsRoutes(r *gin.Engine, checkinsHandler *checkins.Handler, verifier *supabaseauth.Verifier) {
