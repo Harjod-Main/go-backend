@@ -35,6 +35,8 @@ type stubRepo struct {
 	updatedValidation *places.Validation
 	firstCorrection   bool
 	updateErr         error
+	lastStampUpdate   *places.UpdateValidationInput
+	lastReserveUpdate *places.UpdateReservedInput
 }
 
 func (s *stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
@@ -124,6 +126,8 @@ func (s *stubRepo) UpdateValidation(
 	_ string,
 	in places.UpdateValidationInput,
 ) (*places.Validation, bool, error) {
+	copied := in
+	s.lastStampUpdate = &copied
 	if s.updateErr != nil {
 		return nil, false, s.updateErr
 	}
@@ -138,6 +142,9 @@ func (s *stubRepo) UpdateValidation(
 	updated.ConditionDescription = in.ConditionDescription
 	updated.Notes = in.Notes
 	updated.ValidationLocation = in.ValidationLocation
+	if in.SignagePhotos != nil {
+		updated.SignagePhotos = append([]string{}, *in.SignagePhotos...)
+	}
 	return &updated, s.firstCorrection, nil
 }
 
@@ -153,6 +160,8 @@ func (s *stubRepo) UpdateReserved(
 	_ string,
 	in places.UpdateReservedInput,
 ) (*places.Reserved, bool, error) {
+	copied := in
+	s.lastReserveUpdate = &copied
 	if s.updateErr != nil {
 		return nil, false, s.updateErr
 	}
@@ -165,6 +174,9 @@ func (s *stubRepo) UpdateReserved(
 	updated.Conditions = in.Conditions
 	updated.Floor = in.Floor
 	updated.Program = nil
+	if in.SignagePhotos != nil {
+		updated.SignagePhotos = append([]string{}, *in.SignagePhotos...)
+	}
 	return &updated, s.firstCorrection, nil
 }
 

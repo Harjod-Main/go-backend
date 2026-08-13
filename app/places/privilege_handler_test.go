@@ -5,15 +5,26 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-common/app"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+const testMediaPrefix = "https://sycwdwymeirxowbrqdgd.supabase.co/storage/v1/object/public/media/"
+
+func TestMain(m *testing.M) {
+	mediaurl.Configure("https://sycwdwymeirxowbrqdgd.supabase.co")
+	code := m.Run()
+	mediaurl.ResetForTest()
+	os.Exit(code)
+}
 
 func TestGetPrivileges_ReturnsPayload(t *testing.T) {
 	r := require.New(t)
@@ -86,6 +97,7 @@ func TestGetPrivilegeDetail_Stamp(t *testing.T) {
 	validation := &places.Validation{
 		ValidationID:   "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		ValidationType: "spending",
+		SignagePhotos:  []string{testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/a.jpg"},
 	}
 
 	engine := gin.New()
@@ -103,6 +115,7 @@ func TestGetPrivilegeDetail_Stamp(t *testing.T) {
 	}
 	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
 	r.Equal("spending", body.Data.ValidationType)
+	r.Equal([]string{testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/a.jpg"}, body.Data.SignagePhotos)
 }
 
 func TestGetPrivilegeDetail_NotFound(t *testing.T) {
@@ -259,3 +272,127 @@ func TestUpdateReserved_Success(t *testing.T) {
 	r.Equal(location, *body.Data.Reserved.Floor)
 	r.Equal(10, body.Data.PointsAwarded)
 }
+
+func TestUpdateStamp_PersistsSignagePhotos(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	validationID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	photo := testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/sign.jpg"
+	repo := &stubRepo{
+		validation: &places.Validation{
+			ValidationID:   validationID,
+			ValidationType: "other",
+		},
+	}
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo, Profiles: &stubProfiles{total: 10}})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/stamp/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateStamp(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"category":              "OTHER",
+		"condition_description": "ฟรี 3 ชั่วโมงแรก",
+		"signagePhotos":         []string{photo},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/privileges/stamp/"+validationID, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.NotNil(repo.lastStampUpdate)
+	r.NotNil(repo.lastStampUpdate.SignagePhotos)
+	r.Equal([]string{photo}, *repo.lastStampUpdate.SignagePhotos)
+
+	var body struct {
+		Data places.StampCorrectionResult `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal([]string{photo}, body.Data.Validation.SignagePhotos)
+}
+
+func TestUpdateStamp_RejectsInvalidSignagePhotos(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo: &stubRepo{
+			validation: &places.Validation{
+				ValidationID:   "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				ValidationType: "other",
+			},
+		},
+	})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/stamp/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateStamp(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"category":              "OTHER",
+		"condition_description": "test",
+		"signagePhotos":         []string{"https://evil.example.com/not-allowed.jpg"},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/privileges/stamp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		bytes.NewReader(payload),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
+}
+
+func TestUpdateReserved_PersistsSignagePhotos(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	reservedID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	photo := testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/reserve.jpg"
+	repo := &stubRepo{
+		reserved: &places.Reserved{
+			ReservedID:      reservedID,
+			ReservationType: "cardholder",
+		},
+	}
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo, Profiles: &stubProfiles{total: 10}})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/reserve/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateReserved(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"category":      "CREDITCARD_HOLDERS",
+		"name":          "SCB M Visa Card",
+		"signagePhotos": []string{photo},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/privileges/reserve/"+reservedID, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.NotNil(repo.lastReserveUpdate)
+	r.NotNil(repo.lastReserveUpdate.SignagePhotos)
+	r.Equal([]string{photo}, *repo.lastReserveUpdate.SignagePhotos)
+}
+

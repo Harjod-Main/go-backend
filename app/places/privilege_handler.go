@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/points"
 	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/profile"
@@ -18,17 +19,19 @@ import (
 )
 
 const (
-	maxStampCorrectionBodyBytes = 32 * 1024
+	maxStampCorrectionBodyBytes = 64 * 1024
 	maxConditionDescriptionLen  = 4000
 	maxStampNotesLen            = 2000
 	maxStampLocationLen         = 500
+	maxPrivilegeSignagePhotos   = 5
 )
 
 type updateStampRequest struct {
-	Category             string  `json:"category"`
-	ConditionDescription string  `json:"condition_description"`
-	Notes                *string `json:"notes"`
-	Location             *string `json:"location"`
+	Category             string    `json:"category"`
+	ConditionDescription string    `json:"condition_description"`
+	Notes                *string   `json:"notes"`
+	Location             *string   `json:"location"`
+	SignagePhotos        *[]string `json:"signagePhotos"`
 }
 
 // GetPrivileges returns parking stamps, reserved spots, and EV chargers for a place.
@@ -211,6 +214,16 @@ func (h *Handler) UpdateStamp(c *gin.Context) {
 		return
 	}
 
+	signagePhotos, ok := parsePrivilegeSignagePhotos(body.SignagePhotos)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
 	if h.profiles != nil {
 		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
 		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
@@ -230,6 +243,7 @@ func (h *Handler) UpdateStamp(c *gin.Context) {
 		Notes:                notes,
 		ValidationLocation:   location,
 		ChangedBy:            claims.Sub,
+		SignagePhotos:        signagePhotos,
 	})
 	if err != nil {
 		slog.Error("update stamp failed", "validation_id", id, "error", err)
@@ -287,10 +301,11 @@ func mapStampCategoryToValidationType(category string) (string, bool) {
 }
 
 type updateReservedRequest struct {
-	Category string  `json:"category"`
-	Name     string  `json:"name"`
-	Rule     *string `json:"rule"`
-	Location *string `json:"location"`
+	Category      string    `json:"category"`
+	Name          string    `json:"name"`
+	Rule          *string   `json:"rule"`
+	Location      *string   `json:"location"`
+	SignagePhotos *[]string `json:"signagePhotos"`
 }
 
 // UpdateReserved handles PATCH /api/v1/privileges/reserve/:id (auth required).
@@ -366,6 +381,16 @@ func (h *Handler) UpdateReserved(c *gin.Context) {
 		return
 	}
 
+	signagePhotos, ok := parsePrivilegeSignagePhotos(body.SignagePhotos)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
 	if h.profiles != nil {
 		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
 		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
@@ -385,6 +410,7 @@ func (h *Handler) UpdateReserved(c *gin.Context) {
 		Conditions:      rule,
 		Floor:           floor,
 		ChangedBy:       claims.Sub,
+		SignagePhotos:   signagePhotos,
 	})
 	if err != nil {
 		slog.Error("update reserved failed", "reserved_id", id, "error", err)
@@ -588,4 +614,25 @@ func trimOptional(value *string, maxLen int) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func parsePrivilegeSignagePhotos(raw *[]string) (*[]string, bool) {
+	if raw == nil {
+		return nil, true
+	}
+	cleaned := make([]string, 0, len(*raw))
+	for _, item := range *raw {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		cleaned = append(cleaned, trimmed)
+	}
+	if len(cleaned) > maxPrivilegeSignagePhotos {
+		return nil, false
+	}
+	if !mediaurl.ValidMediaURLs(cleaned, mediaurl.MaxURLLen) {
+		return nil, false
+	}
+	return &cleaned, true
 }

@@ -89,6 +89,7 @@ type Validation struct {
 	ProgramOther         *string          `json:"program_other"`
 	Program              *Program         `json:"program"`
 	ValidationTier       []ValidationTier `json:"validation_tier"`
+	SignagePhotos        []string         `json:"signage_photos"`
 }
 
 type ValidationTier struct {
@@ -103,6 +104,8 @@ type UpdateValidationInput struct {
 	Notes                *string
 	ValidationLocation   *string
 	ChangedBy            string
+	// SignagePhotos nil = leave existing images; non-nil replaces them (empty clears).
+	SignagePhotos *[]string
 }
 
 type StampCorrectionResult struct {
@@ -116,6 +119,8 @@ type UpdateReservedInput struct {
 	Conditions      *string
 	Floor           *string
 	ChangedBy       string
+	// SignagePhotos nil = leave existing images; non-nil replaces them (empty clears).
+	SignagePhotos *[]string
 }
 
 type ReservedCorrectionResult struct {
@@ -195,6 +200,7 @@ type Reserved struct {
 	SpotsCount           *int     `json:"spots_count"`
 	AdditionalBenefits   *string  `json:"additional_benefits"`
 	Program              *Program `json:"program"`
+	SignagePhotos        []string `json:"signage_photos"`
 }
 
 type EVCharger struct {

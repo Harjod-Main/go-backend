@@ -292,6 +292,13 @@ SELECT json_build_object(
 						)
 						FROM validation_tier vt
 						WHERE vt.validation_id = v.validation_id
+					), '[]'::json),
+					'signage_photos', COALESCE((
+						SELECT json_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
+						FROM place_images img
+						WHERE img.entity_type = 'validation'
+							AND img.entity_id = v.validation_id::text
+							AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
 					), '[]'::json)
 				)
 			)
@@ -321,7 +328,14 @@ SELECT json_build_object(
 								'name', rprog.name,
 								'provider', rprog.provider,
 								'category', rprog.category::text
-							) END
+							) END,
+							'signage_photos', COALESCE((
+								SELECT json_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
+								FROM place_images img
+								WHERE img.entity_type = 'reserved'
+									AND img.entity_id = res.reserved_id::text
+									AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
+							), '[]'::json)
 						)
 						ORDER BY res.reserved_id
 					)
@@ -415,6 +429,13 @@ SELECT json_build_object(
 		)
 		FROM validation_tier vt
 		WHERE vt.validation_id = v.validation_id
+	), '[]'::json),
+	'signage_photos', COALESCE((
+		SELECT json_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
+		FROM place_images img
+		WHERE img.entity_type = 'validation'
+			AND img.entity_id = v.validation_id::text
+			AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
 	), '[]'::json)
 )
 FROM validation v
@@ -423,7 +444,11 @@ WHERE v.validation_id = $1::uuid
 `
 
 func (r *postgresRepo) GetValidation(ctx context.Context, validationID string) (*Validation, error) {
-	return scanJSON[Validation](ctx, r.pool, getValidationSQL, validationID, "validation")
+	v, err := scanJSON[Validation](ctx, r.pool, getValidationSQL, validationID, "validation")
+	if v != nil && v.SignagePhotos == nil {
+		v.SignagePhotos = []string{}
+	}
+	return v, err
 }
 
 const updateValidationSQL = `
@@ -498,6 +523,12 @@ func (r *postgresRepo) UpdateValidation(
 		return nil, false, fmt.Errorf("insert validation audit: %w", err)
 	}
 
+	if in.SignagePhotos != nil {
+		if err := replaceEntityImages(ctx, tx, "validation", validationID, *in.SignagePhotos, in.ChangedBy); err != nil {
+			return nil, false, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit validation update: %w", err)
 	}
@@ -523,7 +554,14 @@ SELECT json_build_object(
 		'name', prog.name,
 		'provider', prog.provider,
 		'category', prog.category::text
-	) END
+	) END,
+	'signage_photos', COALESCE((
+		SELECT json_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
+		FROM place_images img
+		WHERE img.entity_type = 'reserved'
+			AND img.entity_id = res.reserved_id::text
+			AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
+	), '[]'::json)
 )
 FROM reserved res
 LEFT JOIN program prog ON prog.program_id = res.program_id
@@ -531,7 +569,11 @@ WHERE res.reserved_id = $1::uuid
 `
 
 func (r *postgresRepo) GetReserved(ctx context.Context, reservedID string) (*Reserved, error) {
-	return scanJSON[Reserved](ctx, r.pool, getReservedSQL, reservedID, "reserved")
+	v, err := scanJSON[Reserved](ctx, r.pool, getReservedSQL, reservedID, "reserved")
+	if v != nil && v.SignagePhotos == nil {
+		v.SignagePhotos = []string{}
+	}
+	return v, err
 }
 
 const updateReservedSQL = `
@@ -604,6 +646,12 @@ func (r *postgresRepo) UpdateReserved(
 
 	if _, err := tx.Exec(ctx, insertReservedAuditSQL, reservedID, string(oldData), in.ChangedBy); err != nil {
 		return nil, false, fmt.Errorf("insert reserved audit: %w", err)
+	}
+
+	if in.SignagePhotos != nil {
+		if err := replaceEntityImages(ctx, tx, "reserved", reservedID, *in.SignagePhotos, in.ChangedBy); err != nil {
+			return nil, false, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -1053,4 +1101,46 @@ func scanJSON[T any](ctx context.Context, pool *pgxpool.Pool, sql string, id str
 		return nil, fmt.Errorf("decode %s: %w", label, err)
 	}
 	return &value, nil
+}
+
+const deleteEntityImagesSQL = `
+DELETE FROM place_images
+WHERE entity_type = $1 AND entity_id = $2
+`
+
+const insertPrivilegeImageSQL = `
+INSERT INTO place_images (
+	entity_type, entity_id, storage_path, is_primary, is_verified, uploaded_by
+) VALUES (
+	$1, $2, $3, $4, false, $5::uuid
+)
+`
+
+func replaceEntityImages(
+	ctx context.Context,
+	tx pgx.Tx,
+	entityType string,
+	entityID string,
+	urls []string,
+	uploadedBy string,
+) error {
+	if _, err := tx.Exec(ctx, deleteEntityImagesSQL, entityType, entityID); err != nil {
+		return fmt.Errorf("delete %s images: %w", entityType, err)
+	}
+	for i, photoURL := range urls {
+		trimmed := strings.TrimSpace(photoURL)
+		if trimmed == "" {
+			continue
+		}
+		if _, err := tx.Exec(ctx, insertPrivilegeImageSQL,
+			entityType,
+			entityID,
+			trimmed,
+			i == 0,
+			uploadedBy,
+		); err != nil {
+			return fmt.Errorf("insert %s image: %w", entityType, err)
+		}
+	}
+	return nil
 }
