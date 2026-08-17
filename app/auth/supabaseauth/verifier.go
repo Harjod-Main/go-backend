@@ -23,6 +23,14 @@ const (
 	minJWKSCacheTTL     = 30 * time.Second
 	maxJWKSCacheTTL     = 24 * time.Hour
 	defaultHTTPTimeout  = 5 * time.Second
+
+	// Unknown-kid fetches cannot stampede JWKS while the cache is still valid.
+	minJWKSRefreshInterval = 30 * time.Second
+	maxJWTBytes            = 8 << 10
+	maxJWTHeaderBytes      = 1024
+	maxJWTKidChars         = 128
+	maxJWKSBodyBytes       = 64 << 10
+	maxJWKSKeys            = 32
 )
 
 // Claims are the subset of Supabase Auth JWT claims we care about.
@@ -32,6 +40,7 @@ type Claims struct {
 	Aud          FlexibleString `json:"aud"`
 	Exp          int64          `json:"exp"`
 	Iat          int64          `json:"iat"`
+	Nbf          int64          `json:"nbf,omitempty"`
 	Role         string         `json:"role"`
 	Email        string         `json:"email"`
 	UserMetadata map[string]any `json:"user_metadata"`
@@ -81,6 +90,7 @@ type Verifier struct {
 	expiresAt       time.Time
 	refreshAfter    time.Time // proactive refresh threshold (before hard expiry)
 	defaultCacheTTL time.Duration
+	minRefreshEvery time.Duration
 
 	refreshMu sync.Mutex // singleflight JWKS fetches
 }
@@ -103,6 +113,7 @@ func NewVerifier(projectURL, audience string) (*Verifier, error) {
 			Timeout: defaultHTTPTimeout,
 		},
 		defaultCacheTTL: defaultJWKSCacheTTL,
+		minRefreshEvery: minJWKSRefreshInterval,
 		keysByKid:       make(map[string]*ecdsa.PublicKey),
 	}, nil
 }
@@ -126,7 +137,17 @@ func (v *Verifier) SetDefaultJWKSCacheTTLForTest(ttl time.Duration) {
 	}
 }
 
+func (v *Verifier) SetMinJWKSRefreshIntervalForTest(d time.Duration) {
+	if d > 0 {
+		v.minRefreshEvery = d
+	}
+}
+
 func (v *Verifier) Verify(token string) (*Claims, error) {
+	if len(token) > maxJWTBytes {
+		return nil, errors.New("jwt too large")
+	}
+
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, errors.New("invalid jwt format")
@@ -136,6 +157,9 @@ func (v *Verifier) Verify(token string) (*Claims, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode header: %w", err)
 	}
+	if len(headerBytes) > maxJWTHeaderBytes {
+		return nil, errors.New("jwt header too large")
+	}
 
 	var header struct {
 		Alg string `json:"alg"`
@@ -144,6 +168,12 @@ func (v *Verifier) Verify(token string) (*Claims, error) {
 	}
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
 		return nil, fmt.Errorf("unmarshal header: %w", err)
+	}
+	if err := validateJWTTyp(header.Typ); err != nil {
+		return nil, err
+	}
+	if len(header.Kid) > maxJWTKidChars {
+		return nil, errors.New("jwt kid too large")
 	}
 
 	switch header.Alg {
@@ -172,6 +202,18 @@ func (v *Verifier) Verify(token string) (*Claims, error) {
 	}
 
 	return &claims, nil
+}
+
+func validateJWTTyp(typ string) error {
+	if typ == "" {
+		return nil
+	}
+	switch strings.ToUpper(typ) {
+	case "JWT", "AT+JWT":
+		return nil
+	default:
+		return fmt.Errorf("unsupported typ: %s", typ)
+	}
 }
 
 func (v *Verifier) verifyES256(parts []string, kid string) error {
@@ -262,13 +304,21 @@ func (v *Verifier) refreshJWKS(force bool) error {
 	v.mu.RLock()
 	stillSoftFresh := !v.refreshAfter.IsZero() && now.Before(v.refreshAfter)
 	stillHardFresh := !v.expiresAt.IsZero() && now.Before(v.expiresAt)
+	lastFetch := v.fetchedAt
+	minEvery := v.minRefreshEvery
 	v.mu.RUnlock()
+	if minEvery <= 0 {
+		minEvery = minJWKSRefreshInterval
+	}
 
 	// Another goroutine may have refreshed while we waited for the lock.
 	if !force && stillSoftFresh {
 		return nil
 	}
-	_ = stillHardFresh // hard-fresh soft-stale continues into a fetch below
+	// Unknown kid must not trigger a JWKS fetch on every random kid.
+	if force && stillHardFresh && !lastFetch.IsZero() && now.Sub(lastFetch) < minEvery {
+		return nil
+	}
 
 	req, err := http.NewRequest(http.MethodGet, v.jwksURL, nil)
 	if err != nil {
@@ -286,9 +336,21 @@ func (v *Verifier) refreshJWKS(force bool) error {
 		return fmt.Errorf("jwks fetch: status %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	limited := io.LimitReader(res.Body, maxJWKSBodyBytes+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return fmt.Errorf("jwks read: %w", err)
+	}
+	if len(body) > maxJWKSBodyBytes {
+		return errors.New("jwks response too large")
+	}
+
 	var payload jwksResponse
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return fmt.Errorf("jwks decode: %w", err)
+	}
+	if len(payload.Keys) > maxJWKSKeys {
+		payload.Keys = payload.Keys[:maxJWKSKeys]
 	}
 
 	next := make(map[string]*ecdsa.PublicKey, len(payload.Keys))
@@ -414,6 +476,9 @@ func (v *Verifier) validateClaims(claims *Claims) error {
 		return errors.New("token expired")
 	}
 	if claims.Iat > now+60 {
+		return errors.New("token not yet valid")
+	}
+	if claims.Nbf > now+60 {
 		return errors.New("token not yet valid")
 	}
 	if claims.Iss != v.issuer {
