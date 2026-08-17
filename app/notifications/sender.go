@@ -10,25 +10,37 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
-	maxPushAttempts = 5
-	pushSendTimeout = 15 * time.Second
-	pushPollEvery   = 2 * time.Second
-	pushStaleAfter  = 2 * time.Minute
-	pushCloseWait   = 3 * time.Second
+	maxPushAttempts       = 5
+	pushSendTimeout       = 15 * time.Second
+	pushPollEvery         = 2 * time.Second
+	pushStaleAfter        = 2 * time.Minute
+	pushCloseWait         = 18 * time.Second
+	pushPurgeEvery        = 10 * time.Minute
+	pushWorkerCount       = 6
+	webPushMaxConcurrent  = 4
+	expoPushMaxConcurrent = 4
 )
 
 type Sender struct {
-	repo   NotificationsRepository
-	queue  JobQueue
-	cancel context.CancelFunc
-	done   chan struct{}
-	wake   chan struct{}
+	repo        NotificationsRepository
+	queue       JobQueue
+	cancel      context.CancelFunc
+	done        chan struct{}
+	wake        chan struct{}
+	workers     *semaphore.Weighted
+	inFlight    sync.WaitGroup
+	webPushGate *providerGate
+	expoGate    *providerGate
+	httpClient  *http.Client
 
 	// deliverFn lets tests stub provider calls without hitting the network.
 	deliverFn func(ctx context.Context, userID string, evt NotificationEvent) error
@@ -45,11 +57,15 @@ func NewSender(repo NotificationsRepository) *Sender {
 func newSender(repo NotificationsRepository, queue JobQueue, startWorker bool) *Sender {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Sender{
-		repo:   repo,
-		queue:  queue,
-		cancel: cancel,
-		done:   make(chan struct{}),
-		wake:   make(chan struct{}, 1),
+		repo:        repo,
+		queue:       queue,
+		cancel:      cancel,
+		done:        make(chan struct{}),
+		wake:        make(chan struct{}, 1),
+		workers:     semaphore.NewWeighted(pushWorkerCount),
+		webPushGate: newProviderGate("webpush", webPushMaxConcurrent),
+		expoGate:    newProviderGate("expo", expoPushMaxConcurrent),
+		httpClient:  &http.Client{Timeout: pushSendTimeout},
 	}
 	if !startWorker {
 		close(s.done)
@@ -114,17 +130,63 @@ func (s *Sender) run(ctx context.Context) {
 	defer close(s.done)
 	ticker := time.NewTicker(pushPollEvery)
 	defer ticker.Stop()
+	maintain := time.NewTicker(pushPurgeEvery)
+	defer maintain.Stop()
+
+	s.maintain(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
+			s.inFlight.Wait()
 			return
 		case <-s.wake:
 			s.drain(ctx)
 		case <-ticker.C:
 			s.drain(ctx)
+		case <-maintain.C:
+			s.maintain(ctx)
 		}
 	}
+}
+
+func (s *Sender) maintain(ctx context.Context) {
+	if s.queue == nil {
+		return
+	}
+
+	var purge JobPurgeResult
+	result, err := s.queue.PurgeExpired(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Error("purge notification jobs failed", "error", err)
+	} else {
+		purge = result
+	}
+
+	stats, err := s.queue.Stats(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Error("notification job stats failed", "error", err)
+		return
+	}
+
+	slog.Info("notification job metrics",
+		"pending", stats.Pending,
+		"processing", stats.Processing,
+		"done", stats.Done,
+		"failed", stats.Failed,
+		"retried", stats.Retried,
+		"retry_attempts", stats.RetryAttempts,
+		"deleted_done", purge.DeletedDone,
+		"deleted_failed", purge.DeletedFailed,
+		"web_push_circuit", s.webPushGate.breaker.State(),
+		"expo_circuit", s.expoGate.breaker.State(),
+	)
 }
 
 func (s *Sender) drain(ctx context.Context) {
@@ -142,8 +204,12 @@ func (s *Sender) drain(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if !s.workers.TryAcquire(1) {
+			return
+		}
 		job, err := s.queue.Claim(ctx)
 		if err != nil {
+			s.workers.Release(1)
 			if ctx.Err() != nil {
 				return
 			}
@@ -151,9 +217,16 @@ func (s *Sender) drain(ctx context.Context) {
 			return
 		}
 		if job == nil {
+			s.workers.Release(1)
 			return
 		}
-		s.processJob(job)
+		s.inFlight.Add(1)
+		go func(job *NotificationJob) {
+			defer s.inFlight.Done()
+			defer s.workers.Release(1)
+			s.processJob(job)
+			s.nudge()
+		}(job)
 	}
 }
 
@@ -191,7 +264,11 @@ func (s *Sender) processJob(job *NotificationJob) {
 		return
 	}
 
-	next := time.Now().UTC().Add(retryDelay(attempts))
+	delay := retryDelay(attempts)
+	if errors.Is(err, errCircuitOpen) && delay < breakerOpenFor {
+		delay = breakerOpenFor
+	}
+	next := time.Now().UTC().Add(delay)
 	slog.Warn("notification job scheduled for retry",
 		"job_id", job.JobID,
 		"user_id", job.UserID,
@@ -230,8 +307,17 @@ func (s *Sender) deliver(ctx context.Context, userID string, evt NotificationEve
 		return nil
 	}
 
-	webErr := s.sendWebPush(ctx, userID, evt)
-	expoErr := s.sendExpoPush(ctx, userID, evt)
+	var webErr, expoErr error
+	g := new(errgroup.Group)
+	g.Go(func() error {
+		webErr = s.sendWebPush(ctx, userID, evt)
+		return nil
+	})
+	g.Go(func() error {
+		expoErr = s.sendExpoPush(ctx, userID, evt)
+		return nil
+	})
+	_ = g.Wait()
 	return errors.Join(webErr, expoErr)
 }
 
@@ -282,23 +368,44 @@ func (s *Sender) sendWebPush(ctx context.Context, userID string, evt Notificatio
 		VAPIDPrivateKey: privateKey,
 	}
 
+	g := new(errgroup.Group)
+	var mu sync.Mutex
 	var sendErr error
 	for _, sub := range subscriptions {
-		s := &webpush.Subscription{
-			Endpoint: sub.Endpoint,
-			Keys: webpush.Keys{
-				Auth:   sub.Keys.Auth,
-				P256dh: sub.Keys.P256dh,
-			},
-		}
-		resp, err := webpush.SendNotificationWithContext(ctx, message, s, opts)
-		if err != nil {
-			sendErr = errors.Join(sendErr, fmt.Errorf("webpush send: %w", err))
-			continue
-		}
-		_ = resp.Body.Close()
+		sub := sub
+		g.Go(func() error {
+			err := s.webPushGate.Do(ctx, func() error {
+				return sendOneWebPush(ctx, message, sub, opts)
+			})
+			if err != nil {
+				mu.Lock()
+				sendErr = errors.Join(sendErr, err)
+				mu.Unlock()
+			}
+			return nil
+		})
 	}
+	_ = g.Wait()
 	return sendErr
+}
+
+func sendOneWebPush(ctx context.Context, message []byte, sub WebPushSubscriptionRequest, opts *webpush.Options) error {
+	target := &webpush.Subscription{
+		Endpoint: sub.Endpoint,
+		Keys: webpush.Keys{
+			Auth:   sub.Keys.Auth,
+			P256dh: sub.Keys.P256dh,
+		},
+	}
+	resp, err := webpush.SendNotificationWithContext(ctx, message, target, opts)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return err
+		}
+		return errors.Join(errProviderOutage, fmt.Errorf("webpush send: %w", err))
+	}
+	defer resp.Body.Close()
+	return classifyHTTPStatus("webpush", resp.StatusCode)
 }
 
 func (s *Sender) sendExpoPush(ctx context.Context, userID string, evt NotificationEvent) error {
@@ -320,56 +427,72 @@ func (s *Sender) sendExpoPush(ctx context.Context, userID string, evt Notificati
 		return nil
 	}
 
-	client := &http.Client{Timeout: pushSendTimeout}
+	client := s.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: pushSendTimeout}
+	}
 
-	type expoRequest struct {
+	g := new(errgroup.Group)
+	var mu sync.Mutex
+	var sendErr error
+	for _, token := range tokens {
+		token := token
+		g.Go(func() error {
+			err := s.expoGate.Do(ctx, func() error {
+				return sendOneExpoPush(ctx, client, expoAccessToken, token.Token, title, body, evt)
+			})
+			if err != nil {
+				mu.Lock()
+				sendErr = errors.Join(sendErr, err)
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return sendErr
+}
+
+func sendOneExpoPush(ctx context.Context, client *http.Client, accessToken, to, title, body string, evt NotificationEvent) error {
+	reqBody := struct {
 		To    string `json:"to"`
 		Title string `json:"title,omitempty"`
 		Body  string `json:"body,omitempty"`
 		Data  any    `json:"data,omitempty"`
+	}{
+		To:    to,
+		Title: title,
+		Body:  body,
+		Data: map[string]any{
+			"url":  evt.URL,
+			"type": evt.Type,
+		},
 	}
 
-	var sendErr error
-	for _, token := range tokens {
-		reqBody := expoRequest{
-			To:    token.Token,
-			Title: title,
-			Body:  body,
-			Data: map[string]any{
-				"url":  evt.URL,
-				"type": evt.Type,
-			},
-		}
-
-		raw, err := json.Marshal(reqBody)
-		if err != nil {
-			sendErr = errors.Join(sendErr, fmt.Errorf("marshal expo request: %w", err))
-			continue
-		}
-
-		req, err := http.NewRequestWithContext(
-			ctx,
-			http.MethodPost,
-			"https://exp.host/--/api/v2/push/send",
-			bytes.NewReader(raw),
-		)
-		if err != nil {
-			sendErr = errors.Join(sendErr, fmt.Errorf("build expo request: %w", err))
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+expoAccessToken)
-
-		resp, err := client.Do(req)
-		if err != nil {
-			sendErr = errors.Join(sendErr, fmt.Errorf("expo request: %w", err))
-			continue
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			sendErr = errors.Join(sendErr, fmt.Errorf("expo non-2xx status: %d", resp.StatusCode))
-		}
+	raw, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshal expo request: %w", err)
 	}
 
-	return sendErr
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		"https://exp.host/--/api/v2/push/send",
+		bytes.NewReader(raw),
+	)
+	if err != nil {
+		return fmt.Errorf("build expo request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return err
+		}
+		return errors.Join(errProviderOutage, fmt.Errorf("expo request: %w", err))
+	}
+	defer resp.Body.Close()
+	return classifyHTTPStatus("expo", resp.StatusCode)
 }

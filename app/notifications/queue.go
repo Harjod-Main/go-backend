@@ -16,4 +16,23 @@ type JobQueue interface {
 	Retry(ctx context.Context, jobID string, attempts int, nextAttemptAt time.Time, lastError string) error
 	Fail(ctx context.Context, jobID string, lastError string) error
 	ReclaimStale(ctx context.Context, staleAfter time.Duration) error
+	PurgeExpired(ctx context.Context) (JobPurgeResult, error)
+	Stats(ctx context.Context) (JobQueueStats, error)
+}
+
+// JobPurgeResult is how many terminal rows a cleanup pass removed.
+type JobPurgeResult struct {
+	DeletedDone   int64 `json:"deleted_done"`
+	DeletedFailed int64 `json:"deleted_failed"`
+}
+
+// JobQueueStats is a snapshot of outbox depth for logs and ops checks.
+type JobQueueStats struct {
+	Pending         int64   `json:"pending"`
+	Processing      int64   `json:"processing"`
+	Done            int64   `json:"done"`
+	Failed          int64   `json:"failed"`
+	Retried         int64   `json:"retried"`
+	RetryAttempts   int64   `json:"retry_attempts"`
+	OldestPendingAt *string `json:"oldest_pending_at"`
 }

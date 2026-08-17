@@ -310,6 +310,32 @@ func (r *postgresRepo) ReclaimStale(ctx context.Context, staleAfter time.Duratio
 	return nil
 }
 
+func (r *postgresRepo) PurgeExpired(ctx context.Context) (JobPurgeResult, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, `SELECT public.purge_notification_jobs()`).Scan(&raw)
+	if err != nil {
+		return JobPurgeResult{}, fmt.Errorf("purge notification jobs: %w", err)
+	}
+	var result JobPurgeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return JobPurgeResult{}, fmt.Errorf("decode notification job purge: %w", err)
+	}
+	return result, nil
+}
+
+func (r *postgresRepo) Stats(ctx context.Context) (JobQueueStats, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, `SELECT public.notification_job_stats()`).Scan(&raw)
+	if err != nil {
+		return JobQueueStats{}, fmt.Errorf("notification job stats: %w", err)
+	}
+	var stats JobQueueStats
+	if err := json.Unmarshal(raw, &stats); err != nil {
+		return JobQueueStats{}, fmt.Errorf("decode notification job stats: %w", err)
+	}
+	return stats, nil
+}
+
 func truncateErr(msg string) string {
 	msg = strings.TrimSpace(msg)
 	if len(msg) <= 1000 {
