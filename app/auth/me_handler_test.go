@@ -14,6 +14,7 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth"
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -47,8 +48,12 @@ func (s *stubProfileRepo) Update(context.Context, string, *string, *string, *str
 	return nil, nil
 }
 
-func (s *stubProfileRepo) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
-	return amount, nil
+func (s *stubProfileRepo) AddCreditPoints(_ context.Context, _ string, in profile.CreditAward) (int, error) {
+	return in.Amount, nil
+}
+
+func (s *stubProfileRepo) ListCreditEvents(context.Context, string, int, *pagination.Cursor) ([]profile.CreditEvent, *string, error) {
+	return nil, nil, nil
 }
 
 func (s *stubProfileRepo) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {

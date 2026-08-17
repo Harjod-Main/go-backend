@@ -3,6 +3,8 @@ package profile
 import (
 	"context"
 	"errors"
+
+	"github.com/RinTanth/go-backend/app/pagination"
 )
 
 var (
@@ -26,8 +28,9 @@ type Repository interface {
 	// It never creates a row; returns ErrNotFound when the profile is missing.
 	SyncFromOAuth(ctx context.Context, userID, email string, seed OAuthSeed) (*Profile, error)
 	Update(ctx context.Context, userID string, displayName, username *string, avatarURL *string, clearAvatar bool) (*Profile, error)
-	// AddCreditPoints increments profiles.credit_points and returns the new total.
-	AddCreditPoints(ctx context.Context, userID string, amount int) (int, error)
+	// AddCreditPoints increments profiles.credit_points, records a ledger event, and returns the new total.
+	AddCreditPoints(ctx context.Context, userID string, in CreditAward) (int, error)
+	ListCreditEvents(ctx context.Context, userID string, limit int, cursor *pagination.Cursor) ([]CreditEvent, *string, error)
 	ListLeaderboard(ctx context.Context, limit int) ([]LeaderboardEntry, error)
 	LeaderboardRank(ctx context.Context, userID string) (rank int, creditPoints int, err error)
 }

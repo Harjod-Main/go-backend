@@ -237,7 +237,13 @@ func (h *Handler) UpdateRate(c *gin.Context) {
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
+			Amount:     points.PrivilegeCorrection,
+			Reason:     points.ReasonCorrection,
+			SourceType: "rate",
+			SourceID:   placeID,
+			PlaceID:    profile.OptionalPlaceID(placeID),
+		}); err != nil {
 			slog.Error("award rate correction points failed", "user_id", claims.Sub, "error", err)
 		} else {
 			pointsAwarded = points.PrivilegeCorrection

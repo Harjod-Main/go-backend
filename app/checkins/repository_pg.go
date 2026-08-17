@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RinTanth/go-backend/app/pagination"
+	"github.com/RinTanth/go-backend/app/points"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -115,6 +116,18 @@ func (r *postgresRepo) Create(ctx context.Context, in CreateInput) (*CheckIn, er
 			return nil, fmt.Errorf("bump credit points: profile missing for user %s", in.UserID)
 		}
 		return nil, fmt.Errorf("bump credit points: %w", err)
+	}
+
+	if err := points.InsertEvent(ctx, tx, points.Event{
+		UserID:     in.UserID,
+		Amount:     TotalPointsAwarded,
+		Reason:     points.ReasonCheckIn,
+		SourceType: "check_in",
+		SourceID:   out.CheckInID,
+		PlaceID:    &in.PlaceID,
+		CreatedAt:  now,
+	}); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

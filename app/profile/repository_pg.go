@@ -11,6 +11,8 @@ import (
 	"unicode"
 
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/pagination"
+	"github.com/RinTanth/go-backend/app/points"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -215,19 +217,118 @@ WHERE user_id = $1::uuid
 RETURNING credit_points
 `
 
-func (r *postgresRepo) AddCreditPoints(ctx context.Context, userID string, amount int) (int, error) {
-	if amount <= 0 {
+func (r *postgresRepo) AddCreditPoints(ctx context.Context, userID string, in CreditAward) (int, error) {
+	if in.Amount <= 0 {
 		return 0, fmt.Errorf("add credit points: amount must be positive")
 	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin credit points tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
 	var total int
-	err := r.pool.QueryRow(ctx, addCreditPointsSQL, userID, amount, time.Now().UTC()).Scan(&total)
+	err = tx.QueryRow(ctx, addCreditPointsSQL, userID, in.Amount, now).Scan(&total)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrNotFound
 		}
 		return 0, fmt.Errorf("add credit points: %w", err)
 	}
+
+	if err := points.InsertEvent(ctx, tx, points.Event{
+		UserID:     userID,
+		Amount:     in.Amount,
+		Reason:     in.Reason,
+		SourceType: in.SourceType,
+		SourceID:   in.SourceID,
+		PlaceID:    in.PlaceID,
+		CreatedAt:  now,
+	}); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit credit points: %w", err)
+	}
 	return total, nil
+}
+
+const listCreditEventsSQL = `
+SELECT
+  e.event_id::text,
+  e.amount,
+  e.reason,
+  e.source_type,
+  e.source_id,
+  COALESCE(e.place_id::text, ''),
+  COALESCE(pl.name_th, ''),
+  COALESCE(pl.name_en, ''),
+  e.created_at
+FROM credit_point_events e
+LEFT JOIN places pl ON pl.place_id = e.place_id
+WHERE e.user_id = $1::uuid
+  AND (
+    $2::timestamptz IS NULL
+    OR (e.created_at, e.event_id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY e.created_at DESC, e.event_id DESC
+LIMIT $4
+`
+
+func (r *postgresRepo) ListCreditEvents(
+	ctx context.Context,
+	userID string,
+	limit int,
+	cursor *pagination.Cursor,
+) ([]CreditEvent, *string, error) {
+	var cursorAt any
+	var cursorID any
+	if cursor != nil {
+		cursorAt = cursor.CreatedAt
+		cursorID = cursor.ID
+	}
+
+	rows, err := r.pool.Query(ctx, listCreditEventsSQL, userID, cursorAt, cursorID, limit+1)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list credit events: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]CreditEvent, 0, limit)
+	for rows.Next() {
+		var item CreditEvent
+		if err := rows.Scan(
+			&item.EventID,
+			&item.Amount,
+			&item.Reason,
+			&item.SourceType,
+			&item.SourceID,
+			&item.PlaceID,
+			&item.PlaceNameTh,
+			&item.PlaceNameEn,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan credit event: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate credit events: %w", err)
+	}
+
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	var nextCursor *string
+	if hasMore && len(out) > 0 {
+		last := out[len(out)-1]
+		nextCursor = pagination.NextFromLast(true, last.CreatedAt, last.EventID)
+	}
+	return out, nextCursor, nil
 }
 
 const listLeaderboardSQL = `

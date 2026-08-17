@@ -102,6 +102,60 @@ func (h *Handler) ListLeaderboard(c *gin.Context) {
 	})
 }
 
+// ListCreditHistory handles GET /api/v1/me/credit-points (auth required).
+func (h *Handler) ListCreditHistory(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[CreditEventListResponse]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	limit := pagination.ParseLimit(c.Query("limit"), 20, 100)
+
+	var cursor *pagination.Cursor
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		decoded, err := pagination.Decode(raw)
+		if err != nil {
+			wrapper.Respond(c, wrapper.ResponseOption[CreditEventListResponse]{
+				HTTPStatus: http.StatusBadRequest,
+				Code:       app.CodeBadRequest,
+				Message:    app.MessageBadRequest,
+			})
+			return
+		}
+		cursor = &decoded
+	}
+
+	items, nextCursor, err := h.repo.ListCreditEvents(c.Request.Context(), claims.Sub, limit, cursor)
+	if err != nil {
+		slog.Error("list credit events failed", "user_id", claims.Sub, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[CreditEventListResponse]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if items == nil {
+		items = []CreditEvent{}
+	}
+
+	wrapper.Respond(c, wrapper.ResponseOption[CreditEventListResponse]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data: &CreditEventListResponse{
+			Events:     items,
+			NextCursor: nextCursor,
+			HasMore:    nextCursor != nil,
+		},
+	})
+}
+
 // Update handles PATCH /api/v1/profile
 func (h *Handler) Update(c *gin.Context) {
 	claims, ok := supabaseauth.ClaimsFromGin(c)

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
@@ -270,9 +271,12 @@ func (s *stubProfiles) SyncFromOAuth(context.Context, string, string, profile.OA
 func (s *stubProfiles) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
 	return nil, profile.ErrNotFound
 }
-func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
-	s.total += amount
+func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, in profile.CreditAward) (int, error) {
+	s.total += in.Amount
 	return s.total, nil
+}
+func (s *stubProfiles) ListCreditEvents(context.Context, string, int, *pagination.Cursor) ([]profile.CreditEvent, *string, error) {
+	return nil, nil, nil
 }
 func (s *stubProfiles) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
 	return nil, nil

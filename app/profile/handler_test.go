@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
+	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ type stubRepo struct {
 	getErr      error
 	updateOut   *profile.Profile
 	updateErr   error
+	events      []profile.CreditEvent
 	getCalls    atomic.Int32
 	ensureCalls atomic.Int32
 	updateCalls atomic.Int32
@@ -47,8 +49,12 @@ func (s *stubRepo) Update(context.Context, string, *string, *string, *string, bo
 	return s.updateOut, s.updateErr
 }
 
-func (s *stubRepo) AddCreditPoints(_ context.Context, _ string, amount int) (int, error) {
-	return amount, nil
+func (s *stubRepo) AddCreditPoints(_ context.Context, _ string, in profile.CreditAward) (int, error) {
+	return in.Amount, nil
+}
+
+func (s *stubRepo) ListCreditEvents(context.Context, string, int, *pagination.Cursor) ([]profile.CreditEvent, *string, error) {
+	return s.events, nil, nil
 }
 
 func (s *stubRepo) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
@@ -142,4 +148,49 @@ func TestUpdateProfile_RejectsOversizedBody(t *testing.T) {
 
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.Equal(int32(0), repo.updateCalls.Load())
+}
+
+func TestListCreditHistory_RequiresAuth(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	handler := profile.NewHandler(profile.HandlerConfig{Repo: &stubRepo{}})
+	engine := gin.New()
+	engine.GET("/api/v1/me/credit-points", handler.ListCreditHistory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/credit-points", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func TestListCreditHistory_ReturnsEvents(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{
+		events: []profile.CreditEvent{{
+			EventID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			Amount:  50,
+			Reason:  "review",
+		}},
+	}
+	handler := profile.NewHandler(profile.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.Use(withClaims())
+	engine.GET("/api/v1/me/credit-points", handler.ListCreditHistory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/credit-points", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	var body struct {
+		Data profile.CreditEventListResponse `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Len(body.Data.Events, 1)
+	r.Equal("review", body.Data.Events[0].Reason)
+	r.Equal(50, body.Data.Events[0].Amount)
 }

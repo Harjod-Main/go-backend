@@ -12,6 +12,7 @@ import (
 	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/RinTanth/go-backend/app/profile"
+	"github.com/RinTanth/go-backend/app/referrals"
 	"github.com/RinTanth/go-backend/app/reports"
 	"github.com/RinTanth/go-backend/app/reviews"
 	"github.com/RinTanth/go-backend/app/submissions"
@@ -65,17 +66,17 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 
 	profileRepo := profile.NewPostgresRepo(pool)
 	placesHandler := places.NewHandler(places.HandlerConfig{
-		Repo:                   places.NewPostgresRepo(pool),
-		Google:                 places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
-		Profiles:               profileRepo,
-		NotificationsSender:    notificationsSender,
+		Repo:                places.NewPostgresRepo(pool),
+		Google:              places.NewGooglePlacesClient(cfg.GooglePlaces.APIKey),
+		Profiles:            profileRepo,
+		NotificationsSender: notificationsSender,
 	})
 
 	profileHandler := profile.NewHandler(profile.HandlerConfig{Repo: profileRepo})
 	reviewsHandler := reviews.NewHandler(reviews.HandlerConfig{
-		Repo:                  reviews.NewPostgresRepo(pool),
-		Profiles:              profileRepo,
-		NotificationsSender:   notificationsSender,
+		Repo:                reviews.NewPostgresRepo(pool),
+		Profiles:            profileRepo,
+		NotificationsSender: notificationsSender,
 	})
 	reportsHandler := reports.NewHandler(reports.HandlerConfig{
 		Repo: reports.NewPostgresRepo(pool),
@@ -93,19 +94,23 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	authHandler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: profileRepo})
 	submissionsHandler := submissions.NewHandler(submissions.HandlerConfig{
 		Repo:                submissions.NewPostgresRepo(pool),
-		Profiles:           profileRepo,
+		Profiles:            profileRepo,
 		NotificationsSender: notificationsSender,
 	})
 	checkinsHandler := checkins.NewHandler(checkins.HandlerConfig{
-		Repo:                  checkins.NewPostgresRepo(pool),
-		Profiles:              profileRepo,
-		NotificationsSender:   notificationsSender,
+		Repo:                checkins.NewPostgresRepo(pool),
+		Profiles:            profileRepo,
+		NotificationsSender: notificationsSender,
 	})
 	mystatsHandler := mystats.NewHandler(mystats.HandlerConfig{
 		Repo: mystats.NewPostgresRepo(pool),
 	})
 	notificationsHandler := notifications.NewHandler(notifications.HandlerConfig{
 		Repo: notificationsRepo,
+	})
+	referralsHandler := referrals.NewHandler(referrals.HandlerConfig{
+		Repo:                referrals.NewPostgresRepo(pool),
+		NotificationsSender: notificationsSender,
 	})
 	registerPlacesRoutes(r, placesHandler, verifier)
 	registerAuthRoutes(r, authHandler, verifier)
@@ -116,6 +121,7 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	registerCheckInsRoutes(r, checkinsHandler, verifier)
 	registerMyStatsRoutes(r, mystatsHandler, verifier)
 	registerNotificationsRoutes(r, notificationsHandler, verifier)
+	registerReferralRoutes(r, referralsHandler, verifier)
 
 	return r, pool.Close, nil
 }
@@ -256,6 +262,11 @@ func registerProfileRoutes(r *gin.Engine, profileHandler *profile.Handler, verif
 		supabaseauth.OptionalMiddleware(verifier),
 		profileHandler.ListLeaderboard,
 	)
+	r.GET(
+		"/api/v1/me/credit-points",
+		supabaseauth.Middleware(verifier),
+		profileHandler.ListCreditHistory,
+	)
 }
 
 func registerSubmissionsRoutes(r *gin.Engine, submissionsHandler *submissions.Handler, verifier *supabaseauth.Verifier) {
@@ -270,6 +281,14 @@ func registerMyStatsRoutes(r *gin.Engine, mystatsHandler *mystats.Handler, verif
 func registerCheckInsRoutes(r *gin.Engine, checkinsHandler *checkins.Handler, verifier *supabaseauth.Verifier) {
 	r.GET("/api/v1/me/check-ins", supabaseauth.Middleware(verifier), checkinsHandler.ListMine)
 	r.POST("/api/v1/places/:placeId/check-ins", supabaseauth.Middleware(verifier), checkinsHandler.Create)
+}
+
+func registerReferralRoutes(r *gin.Engine, referralsHandler *referrals.Handler, verifier *supabaseauth.Verifier) {
+	referralWrites := r.Group("/api/v1/referrals")
+	referralWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	{
+		referralWrites.POST("", referralsHandler.Accept)
+	}
 }
 
 func registerNotificationsRoutes(r *gin.Engine, notificationsHandler *notifications.Handler, verifier *supabaseauth.Verifier) {

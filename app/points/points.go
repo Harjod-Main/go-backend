@@ -6,4 +6,6 @@ const (
 	ReviewCreate        = 50
 	PlaceSubmission     = 50
 	PrivilegeCorrection = 10
+	ReferralReferrer    = 50
+	ReferralReferee     = 50
 )

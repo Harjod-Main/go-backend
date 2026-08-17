@@ -260,7 +260,17 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	if h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), uid, points.PlaceSubmission); err != nil {
+		placeID := ""
+		if submission.PlaceID != nil {
+			placeID = *submission.PlaceID
+		}
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), uid, profile.CreditAward{
+			Amount:     points.PlaceSubmission,
+			Reason:     points.ReasonPlaceSubmission,
+			SourceType: "place_submission",
+			SourceID:   submission.SubmissionID,
+			PlaceID:    profile.OptionalPlaceID(placeID),
+		}); err != nil {
 			slog.Error("award submission points failed", "user_id", uid, "error", err)
 		}
 	}

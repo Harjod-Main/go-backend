@@ -263,7 +263,13 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	if h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.ReviewCreate); err != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
+			Amount:     points.ReviewCreate,
+			Reason:     points.ReasonReview,
+			SourceType: "review",
+			SourceID:   review.ReviewID,
+			PlaceID:    profile.OptionalPlaceID(placeID),
+		}); err != nil {
 			// Review is already persisted; log and continue so the user still gets their review.
 			slog.Error("award review points failed", "user_id", claims.Sub, "error", err)
 		}

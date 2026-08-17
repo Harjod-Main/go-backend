@@ -122,7 +122,13 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
+			Amount:     points.PrivilegeCorrection,
+			Reason:     points.ReasonCorrection,
+			SourceType: "parking_area",
+			SourceID:   placeID,
+			PlaceID:    profile.OptionalPlaceID(placeID),
+		}); err != nil {
 			slog.Error("award amenities correction points failed", "user_id", claims.Sub, "error", err)
 		} else {
 			pointsAwarded = points.PrivilegeCorrection

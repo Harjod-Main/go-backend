@@ -70,8 +70,11 @@ func (s *stubProfiles) SyncFromOAuth(context.Context, string, string, profile.OA
 func (s *stubProfiles) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
 	return nil, profile.ErrNotFound
 }
-func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, _ int) (int, error) {
-	return 0, nil
+func (s *stubProfiles) AddCreditPoints(_ context.Context, _ string, in profile.CreditAward) (int, error) {
+	return in.Amount, nil
+}
+func (s *stubProfiles) ListCreditEvents(context.Context, string, int, *pagination.Cursor) ([]profile.CreditEvent, *string, error) {
+	return nil, nil, nil
 }
 func (s *stubProfiles) ListLeaderboard(context.Context, int) ([]profile.LeaderboardEntry, error) {
 	return nil, nil

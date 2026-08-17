@@ -265,7 +265,13 @@ func (h *Handler) UpdateStamp(c *gin.Context) {
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
+			Amount:     points.PrivilegeCorrection,
+			Reason:     points.ReasonCorrection,
+			SourceType: "validation",
+			SourceID:   id,
+			PlaceID:    profile.OptionalPlaceID(updated.PlaceID),
+		}); err != nil {
 			slog.Error("award stamp correction points failed", "user_id", claims.Sub, "error", err)
 		} else {
 			pointsAwarded = points.PrivilegeCorrection
@@ -432,7 +438,13 @@ func (h *Handler) UpdateReserved(c *gin.Context) {
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
+			Amount:     points.PrivilegeCorrection,
+			Reason:     points.ReasonCorrection,
+			SourceType: "reserved",
+			SourceID:   id,
+			PlaceID:    profile.OptionalPlaceID(updated.PlaceID),
+		}); err != nil {
 			slog.Error("award reserved correction points failed", "user_id", claims.Sub, "error", err)
 		} else {
 			pointsAwarded = points.PrivilegeCorrection
@@ -601,7 +613,13 @@ func (h *Handler) UpdateEV(c *gin.Context) {
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
+			Amount:     points.PrivilegeCorrection,
+			Reason:     points.ReasonCorrection,
+			SourceType: "ev_charger",
+			SourceID:   id,
+			PlaceID:    profile.OptionalPlaceID(updated.PlaceID),
+		}); err != nil {
 			slog.Error("award ev correction points failed", "user_id", claims.Sub, "error", err)
 		} else {
 			pointsAwarded = points.PrivilegeCorrection
