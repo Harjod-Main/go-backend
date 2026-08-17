@@ -12,6 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	maxNotificationBodyBytes = 16 * 1024
+	maxWebPushEndpointLen    = 2048
+	maxWebPushKeyLen         = 256
+	maxIOSPushTokenLen       = 512
+)
+
 type HandlerConfig struct {
 	Repo NotificationsRepository
 }
@@ -28,6 +35,22 @@ type genericOK struct {
 	OK bool `json:"ok"`
 }
 
+func limitNotificationBody(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxNotificationBodyBytes)
+}
+
+func respondNotificationBadRequest(c *gin.Context) {
+	wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
+		HTTPStatus: http.StatusBadRequest,
+		Code:       app.CodeBadRequest,
+		Message:    app.MessageBadRequest,
+	})
+}
+
+func withinLen(value string, maxLen int) bool {
+	return len(value) > 0 && len(value) <= maxLen
+}
+
 // PATCH /api/v1/me/notification-preferences
 func (h *Handler) UpdatePreferences(c *gin.Context) {
 	claims, ok := supabaseauth.ClaimsFromGin(c)
@@ -40,13 +63,10 @@ func (h *Handler) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
+	limitNotificationBody(c)
 	var req NotificationPreferencesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+		respondNotificationBadRequest(c)
 		return
 	}
 
@@ -80,41 +100,26 @@ func (h *Handler) UpsertWebPushSubscription(c *gin.Context) {
 		return
 	}
 
+	limitNotificationBody(c)
 	var req WebPushSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+		respondNotificationBadRequest(c)
 		return
 	}
 
 	req.Endpoint = strings.TrimSpace(req.Endpoint)
-	if req.Endpoint == "" {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
-		return
-	}
-	if req.Keys.P256dh == "" || req.Keys.Auth == "" {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+	req.Keys.P256dh = strings.TrimSpace(req.Keys.P256dh)
+	req.Keys.Auth = strings.TrimSpace(req.Keys.Auth)
+	if !withinLen(req.Endpoint, maxWebPushEndpointLen) ||
+		!withinLen(req.Keys.P256dh, maxWebPushKeyLen) ||
+		!withinLen(req.Keys.Auth, maxWebPushKeyLen) {
+		respondNotificationBadRequest(c)
 		return
 	}
 
 	// Ensure JSON serializable keys (defensive).
 	if _, err := json.Marshal(req.Keys); err != nil {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+		respondNotificationBadRequest(c)
 		return
 	}
 
@@ -153,6 +158,7 @@ func (h *Handler) DeleteWebPushSubscription(c *gin.Context) {
 	}
 
 	// Accept endpoint either from query or JSON body.
+	limitNotificationBody(c)
 	endpoint := strings.TrimSpace(c.Query("endpoint"))
 	if endpoint == "" {
 		var body deleteWebPushBody
@@ -161,12 +167,8 @@ func (h *Handler) DeleteWebPushSubscription(c *gin.Context) {
 		}
 	}
 
-	if endpoint == "" {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+	if !withinLen(endpoint, maxWebPushEndpointLen) {
+		respondNotificationBadRequest(c)
 		return
 	}
 
@@ -205,23 +207,16 @@ func (h *Handler) UpsertIOSPushToken(c *gin.Context) {
 		return
 	}
 
+	limitNotificationBody(c)
 	var req IOSPushTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+		respondNotificationBadRequest(c)
 		return
 	}
 
 	req.Token = strings.TrimSpace(req.Token)
-	if req.Token == "" {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+	if !withinLen(req.Token, maxIOSPushTokenLen) {
+		respondNotificationBadRequest(c)
 		return
 	}
 
@@ -259,6 +254,7 @@ func (h *Handler) DeleteIOSPushToken(c *gin.Context) {
 		return
 	}
 
+	limitNotificationBody(c)
 	token := strings.TrimSpace(c.Query("token"))
 	if token == "" {
 		var body deleteIOSPushBody
@@ -267,12 +263,8 @@ func (h *Handler) DeleteIOSPushToken(c *gin.Context) {
 		}
 	}
 
-	if token == "" {
-		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
-			HTTPStatus: http.StatusBadRequest,
-			Code:       app.CodeBadRequest,
-			Message:    app.MessageBadRequest,
-		})
+	if !withinLen(token, maxIOSPushTokenLen) {
+		respondNotificationBadRequest(c)
 		return
 	}
 
@@ -324,4 +316,3 @@ func (h *Handler) GetPreferences(c *gin.Context) {
 		Data:       prefs,
 	})
 }
-

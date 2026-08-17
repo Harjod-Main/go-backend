@@ -3,8 +3,12 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -192,3 +196,123 @@ func (r *postgresRepo) DeleteIOSPushToken(ctx context.Context, userID string, to
 	return nil
 }
 
+const enqueueNotificationJobSQL = `
+INSERT INTO notification_jobs (user_id, payload)
+VALUES ($1::uuid, $2::jsonb)
+`
+
+func (r *postgresRepo) Enqueue(ctx context.Context, userID string, evt NotificationEvent) error {
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		return fmt.Errorf("marshal notification job: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, enqueueNotificationJobSQL, userID, payload); err != nil {
+		return fmt.Errorf("enqueue notification job: %w", err)
+	}
+	return nil
+}
+
+const claimNotificationJobSQL = `
+WITH next_job AS (
+  SELECT job_id
+  FROM notification_jobs
+  WHERE status = 'pending'
+    AND next_attempt_at <= now()
+  ORDER BY next_attempt_at ASC, created_at ASC
+  FOR UPDATE SKIP LOCKED
+  LIMIT 1
+)
+UPDATE notification_jobs j
+SET status = 'processing',
+    updated_at = now()
+FROM next_job
+WHERE j.job_id = next_job.job_id
+RETURNING j.job_id::text, j.user_id::text, j.payload, j.attempts, j.max_attempts
+`
+
+func (r *postgresRepo) Claim(ctx context.Context) (*NotificationJob, error) {
+	var job NotificationJob
+	var payload []byte
+	err := r.pool.QueryRow(ctx, claimNotificationJobSQL).Scan(
+		&job.JobID, &job.UserID, &payload, &job.Attempts, &job.MaxAttempts,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("claim notification job: %w", err)
+	}
+	if err := json.Unmarshal(payload, &job.Event); err != nil {
+		return nil, fmt.Errorf("decode notification job payload: %w", err)
+	}
+	return &job, nil
+}
+
+func (r *postgresRepo) Complete(ctx context.Context, jobID string) error {
+	const sql = `
+		UPDATE notification_jobs
+		SET status = 'done',
+		    last_error = NULL,
+		    updated_at = now()
+		WHERE job_id = $1::uuid
+	`
+	if _, err := r.pool.Exec(ctx, sql, jobID); err != nil {
+		return fmt.Errorf("complete notification job: %w", err)
+	}
+	return nil
+}
+
+func (r *postgresRepo) Retry(ctx context.Context, jobID string, attempts int, nextAttemptAt time.Time, lastError string) error {
+	const sql = `
+		UPDATE notification_jobs
+		SET status = 'pending',
+		    attempts = $2,
+		    next_attempt_at = $3,
+		    last_error = $4,
+		    updated_at = now()
+		WHERE job_id = $1::uuid
+	`
+	if _, err := r.pool.Exec(ctx, sql, jobID, attempts, nextAttemptAt, truncateErr(lastError)); err != nil {
+		return fmt.Errorf("retry notification job: %w", err)
+	}
+	return nil
+}
+
+func (r *postgresRepo) Fail(ctx context.Context, jobID string, lastError string) error {
+	const sql = `
+		UPDATE notification_jobs
+		SET status = 'failed',
+		    last_error = $2,
+		    updated_at = now()
+		WHERE job_id = $1::uuid
+	`
+	if _, err := r.pool.Exec(ctx, sql, jobID, truncateErr(lastError)); err != nil {
+		return fmt.Errorf("fail notification job: %w", err)
+	}
+	return nil
+}
+
+func (r *postgresRepo) ReclaimStale(ctx context.Context, staleAfter time.Duration) error {
+	if staleAfter <= 0 {
+		staleAfter = 2 * time.Minute
+	}
+	const sql = `
+		UPDATE notification_jobs
+		SET status = 'pending',
+		    updated_at = now()
+		WHERE status = 'processing'
+		  AND updated_at < now() - ($1::double precision * interval '1 second')
+	`
+	if _, err := r.pool.Exec(ctx, sql, staleAfter.Seconds()); err != nil {
+		return fmt.Errorf("reclaim stale notification jobs: %w", err)
+	}
+	return nil
+}
+
+func truncateErr(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if len(msg) <= 1000 {
+		return msg
+	}
+	return msg[:1000]
+}

@@ -29,11 +29,20 @@ type NotificationPreferences struct {
 // NotificationEvent is a high-level event from the app domain (check-in, review, submission, privilege).
 // sender.go maps this into concrete push payloads.
 type NotificationEvent struct {
-	Type          string
-	PlaceID       string
-	Title         string
-	Body          string
-	URL           string
-	PointsAwarded int
+	Type          string `json:"type"`
+	PlaceID       string `json:"placeId,omitempty"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
+	URL           string `json:"url"`
+	PointsAwarded int    `json:"pointsAwarded,omitempty"`
 }
 
+// NotificationJob is a durable push delivery attempt. Handlers enqueue and return;
+// a worker sends Web Push / Expo Push with retries.
+type NotificationJob struct {
+	JobID       string
+	UserID      string
+	Event       NotificationEvent
+	Attempts    int
+	MaxAttempts int
+}

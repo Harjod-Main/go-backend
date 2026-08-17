@@ -123,7 +123,10 @@ func New(cfg config.Config, version, commit string, timeoutDuration time.Duratio
 	registerNotificationsRoutes(r, notificationsHandler, verifier)
 	registerReferralRoutes(r, referralsHandler, verifier)
 
-	return r, pool.Close, nil
+	return r, func() {
+		notificationsSender.Close()
+		pool.Close()
+	}, nil
 }
 
 func registerAuthRoutes(r *gin.Engine, authHandler *auth.Handler, verifier *supabaseauth.Verifier) {
