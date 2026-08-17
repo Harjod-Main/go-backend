@@ -57,3 +57,24 @@ func TestListMapCache_PeekHitsWithoutLoad(t *testing.T) {
 	r.NotEmpty(etag)
 	r.Equal(int32(1), loads.Load(), "peek must not trigger load")
 }
+
+func TestListMapCache_InvalidateClearsEntry(t *testing.T) {
+	r := require.New(t)
+	cache := newListMapCache(time.Minute)
+
+	var loads atomic.Int32
+	load := func(context.Context) ([]Place, error) {
+		loads.Add(1)
+		return []Place{{PlaceID: "p1"}}, nil
+	}
+
+	_, _, err := cache.getOrLoad(context.Background(), load)
+	r.NoError(err)
+	cache.invalidate()
+	_, _, ok := cache.peek()
+	r.False(ok)
+
+	_, _, err = cache.getOrLoad(context.Background(), load)
+	r.NoError(err)
+	r.Equal(int32(2), loads.Load())
+}

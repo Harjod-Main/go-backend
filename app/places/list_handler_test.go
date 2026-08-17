@@ -19,6 +19,7 @@ import (
 
 type stubRepo struct {
 	places            []places.Place
+	card              *places.MapPlaceCard
 	err               error
 	listCalls         atomic.Int32
 	rate              *places.PlaceRateDetail
@@ -48,6 +49,13 @@ func (s *stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
 		return nil, s.err
 	}
 	return s.places, nil
+}
+
+func (s *stubRepo) GetMapPlaceCard(context.Context, string) (*places.MapPlaceCard, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.card, nil
 }
 
 func (s *stubRepo) GetPlaceRate(_ context.Context, placeID string) (*places.PlaceRateDetail, error) {
@@ -287,26 +295,19 @@ func (s *stubProfiles) LeaderboardRank(context.Context, string) (int, int, error
 
 func samplePlaces() []places.Place {
 	freeMinutes := 30
+	minHourly := 40.0
 	avgRating := 4.5
 	return []places.Place{{
-		PlaceID:     "11111111-1111-1111-1111-111111111111",
-		NameTh:      "สยามพารากอน",
-		NameEn:      "Siam Paragon",
-		PlaceType:   "shopping_mall",
-		Latitude:    13.746,
-		Longitude:   100.535,
-		AvgRating:   &avgRating,
-		ReviewCount: 3,
-		ParkingArea: []places.ParkingArea{{
-			Rate: []places.Rate{{
-				FreeMinutes: &freeMinutes,
-				RateTier: []places.RateTier{{
-					TierOrder: 1,
-					Price:     40,
-					Unit:      "hourly",
-				}},
-			}},
-		}},
+		PlaceID:       "11111111-1111-1111-1111-111111111111",
+		NameTh:        "สยามพารากอน",
+		NameEn:        "Siam Paragon",
+		PlaceType:     "shopping_mall",
+		Latitude:      13.746,
+		Longitude:     100.535,
+		AvgRating:     &avgRating,
+		ReviewCount:   3,
+		FreeMinutes:   &freeMinutes,
+		MinHourlyRate: &minHourly,
 	}}
 }
 
@@ -342,8 +343,62 @@ func TestList_ReturnsPlaces(t *testing.T) {
 	r.NotNil(body.Data[0].AvgRating)
 	r.Equal(4.5, *body.Data[0].AvgRating)
 	r.Equal(3, body.Data[0].ReviewCount)
-	r.Equal(30, *body.Data[0].ParkingArea[0].Rate[0].FreeMinutes)
-	r.Equal(40.0, body.Data[0].ParkingArea[0].Rate[0].RateTier[0].Price)
+	r.Equal(30, *body.Data[0].FreeMinutes)
+	r.Equal(40.0, *body.Data[0].MinHourlyRate)
+}
+
+func TestGetMapPlaceCard_ReturnsHoursAndPhotos(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	open := "08:00:00"
+	close := "22:00:00"
+	closed := false
+	card := &places.MapPlaceCard{
+		PlaceID:   "11111111-1111-1111-1111-111111111111",
+		PhotoURLs: []string{"https://cdn.example/p.jpg"},
+		Hours: []places.Hour{{
+			DayOfWeek: "TUE",
+			OpenTime:  &open,
+			CloseTime: &close,
+			IsClosed:  &closed,
+		}},
+	}
+	repo := &stubRepo{card: card}
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.GET("/api/v1/places/:placeId/card", handler.GetMapPlaceCard)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places/11111111-1111-1111-1111-111111111111/card", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+
+	var body struct {
+		Code    string              `json:"code"`
+		Message string              `json:"message"`
+		Data    places.MapPlaceCard `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal(string(app.CodeSuccess), body.Code)
+	r.Equal("https://cdn.example/p.jpg", body.Data.PhotoURLs[0])
+	r.Equal("TUE", body.Data.Hours[0].DayOfWeek)
+}
+
+func TestGetMapPlaceCard_RejectsInvalidID(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{}})
+	engine.GET("/api/v1/places/:placeId/card", handler.GetMapPlaceCard)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places/not-a-uuid/card", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
 }
 
 func TestList_UsesShortTTLCache(t *testing.T) {

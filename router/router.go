@@ -143,6 +143,7 @@ func registerPlacesRoutes(r *gin.Engine, placesHandler *places.Handler, verifier
 		placesGroup.GET("", placesHandler.List)
 		placesGroup.GET("/autocomplete", placesHandler.Autocomplete)
 		placesGroup.GET("/details/:placeId", placesHandler.GetPlaceDetails)
+		placesGroup.GET("/:placeId/card", placesHandler.GetMapPlaceCard)
 		placesGroup.GET("/:placeId/rate", placesHandler.GetRate)
 		placesGroup.GET("/:placeId/privileges", placesHandler.GetPrivileges)
 		placesGroup.GET("/:placeId/quote", placesHandler.GetQuote)

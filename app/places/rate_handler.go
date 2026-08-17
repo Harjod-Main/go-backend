@@ -17,7 +17,7 @@ import (
 const (
 	maxRateCorrectionBodyBytes = 32 * 1024
 	maxRateNotesLen            = 4000
-	maxRateSpecialEntryLen    = 3000
+	maxRateSpecialEntryLen     = 3000
 )
 
 // GetRate returns the parking rate sheet for a place (public read).
@@ -52,17 +52,17 @@ func (h *Handler) GetRate(c *gin.Context) {
 }
 
 type rateTierCorrectionRequest struct {
-	FromHour      float64  `json:"fromHour"`
-	ToHour        *float64 `json:"toHour"`
-	PricePerHour  float64  `json:"pricePerHour"`
-	Unit          string   `json:"unit"`
+	FromHour     float64  `json:"fromHour"`
+	ToHour       *float64 `json:"toHour"`
+	PricePerHour float64  `json:"pricePerHour"`
+	Unit         string   `json:"unit"`
 }
 
 type updateRateRequest struct {
-	FreeMinutes       *int                      `json:"freeMinutes"`
-	LostTicketFee     *float64                 `json:"lostTicketFee"`
-	OvernightFee      *float64                 `json:"overnightFee"`
-	SpecialConditions []string                `json:"specialConditions"`
+	FreeMinutes       *int                        `json:"freeMinutes"`
+	LostTicketFee     *float64                    `json:"lostTicketFee"`
+	OvernightFee      *float64                    `json:"overnightFee"`
+	SpecialConditions []string                    `json:"specialConditions"`
 	RateTiers         []rateTierCorrectionRequest `json:"rateTiers"`
 }
 
@@ -210,12 +210,12 @@ func (h *Handler) UpdateRate(c *gin.Context) {
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateRate(c.Request.Context(), placeID, UpdateRateInput{
-		FreeMinutes:      body.FreeMinutes,
-		LostTicketFee:    body.LostTicketFee,
-		OvernightFee:     body.OvernightFee,
-		Notes:            notes,
-		RateTiers:        rateTiers,
-		ChangedBy:       claims.Sub,
+		FreeMinutes:   body.FreeMinutes,
+		LostTicketFee: body.LostTicketFee,
+		OvernightFee:  body.OvernightFee,
+		Notes:         notes,
+		RateTiers:     rateTiers,
+		ChangedBy:     claims.Sub,
 	})
 	if err != nil {
 		slog.Error("update rate failed", "place_id", placeID, "error", err)
@@ -234,6 +234,8 @@ func (h *Handler) UpdateRate(c *gin.Context) {
 		})
 		return
 	}
+
+	h.listCache.invalidate()
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {

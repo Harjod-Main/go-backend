@@ -23,8 +23,8 @@ type cacheEntry struct {
 	etag   string
 }
 
-// listMapCache memoizes ListMapPlaces for a short TTL to avoid repeating the
-// heavy nested aggregation on every public GET.
+// listMapCache memoizes ListMapPlaces for a short TTL so concurrent map
+// clients share one summary query.
 type listMapCache struct {
 	mu      sync.RWMutex
 	ttl     time.Duration
@@ -97,6 +97,14 @@ func etagForPlaces(places []Place) (string, error) {
 	}
 	sum := sha1.Sum(raw)
 	return `"` + hex.EncodeToString(sum[:]) + `"`, nil
+}
+
+func (c *listMapCache) invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.places = nil
+	c.etag = ""
+	c.expires = time.Time{}
 }
 
 func etagMatches(ifNoneMatch, etag string) bool {

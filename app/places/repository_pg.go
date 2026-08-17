@@ -27,73 +27,74 @@ FROM (
 		pl.district_th,
 		pl.province_th,
 		pl.postal_code,
-		COALESCE((
-			SELECT array_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
-			FROM place_images img
-			WHERE img.entity_type = 'place'
-				AND img.entity_id = pl.place_id::text
-				AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
-		), COALESCE((
-			SELECT ps.photo_urls
-			FROM place_submissions ps
-			WHERE ps.place_id = pl.place_id
-				AND ps.status = 'approved'
-				AND COALESCE(cardinality(ps.photo_urls), 0) > 0
-			ORDER BY ps.created_at DESC
-			LIMIT 1
-		), '{}'::text[])) AS photo_urls,
+		COALESCE(img.photo_url, sub.photo_url) AS photo_url,
 		rev.avg_rating,
 		COALESCE(rev.review_count, 0) AS review_count,
-		COALESCE((
-			SELECT json_agg(area_obj)
-			FROM (
-				SELECT json_build_object(
-					'total_spaces', pa.total_spaces,
-					'has_ev_charging', pa.has_ev_charging,
-					'has_valet', pa.has_valet,
-					'has_cover', pa.has_cover,
-					'transit_access', pa.transit_access,
-					'transit_access_type', pa.transit_access_type,
-					'hours', COALESCE((
-						SELECT json_agg(
-							json_build_object(
-								'day_of_week', h.day_of_week::text,
-								'open_time', CASE WHEN h.open_time IS NULL THEN NULL ELSE to_char(h.open_time, 'HH24:MI:SS') END,
-								'close_time', CASE WHEN h.close_time IS NULL THEN NULL ELSE to_char(h.close_time, 'HH24:MI:SS') END,
-								'is_closed', h.is_closed
-							)
-							ORDER BY h.day_of_week
-						)
-						FROM hours h
-						WHERE h.parking_area_id = pa.parking_area_id
-					), '[]'::json),
-					'rate', COALESCE((
-						SELECT json_agg(
-							json_build_object(
-								'free_minutes', r.free_minutes,
-								'rate_tier', COALESCE((
-									SELECT json_agg(
-										json_build_object(
-											'tier_order', rt.tier_order,
-											'price', rt.price::float8,
-											'unit', rt.unit::text
-										)
-										ORDER BY rt.tier_order
-									)
-									FROM rate_tier rt
-									WHERE rt.rate_id = r.rate_id
-								), '[]'::json)
-							)
-						)
-						FROM rate r
-						WHERE r.parking_area_id = pa.parking_area_id
-					), '[]'::json)
-				) AS area_obj
-				FROM parking_area pa
-				WHERE pa.place_id = pl.place_id
-			) areas
-		), '[]'::json) AS parking_area
+		pa.has_ev_charging,
+		pa.has_valet,
+		pa.has_cover,
+		pa.transit_access,
+		pa.transit_access_type,
+		pa.total_spaces,
+		r.free_minutes,
+		COALESCE(tier.min_hourly_rate, tier.min_flat_rate) AS min_hourly_rate,
+		CASE WHEN h.open_time IS NULL THEN NULL ELSE to_char(h.open_time, 'HH24:MI:SS') END AS today_open_time,
+		CASE WHEN h.close_time IS NULL THEN NULL ELSE to_char(h.close_time, 'HH24:MI:SS') END AS today_close_time,
+		h.is_closed AS today_is_closed
 	FROM places pl
+	LEFT JOIN (
+		SELECT DISTINCT ON (place_id)
+			place_id,
+			parking_area_id,
+			total_spaces,
+			has_ev_charging,
+			has_valet,
+			has_cover,
+			transit_access,
+			transit_access_type
+		FROM parking_area
+		ORDER BY place_id, parking_area_id
+	) pa ON pa.place_id = pl.place_id
+	LEFT JOIN (
+		SELECT DISTINCT ON (parking_area_id)
+			parking_area_id,
+			rate_id,
+			free_minutes
+		FROM rate
+		ORDER BY parking_area_id, rate_id
+	) r ON r.parking_area_id = pa.parking_area_id
+	LEFT JOIN (
+		SELECT
+			rate_id,
+			MIN(price) FILTER (WHERE unit::text = 'hourly')::float8 AS min_hourly_rate,
+			MIN(price) FILTER (WHERE unit::text = 'flat')::float8 AS min_flat_rate
+		FROM rate_tier
+		GROUP BY rate_id
+	) tier ON tier.rate_id = r.rate_id
+	LEFT JOIN hours h ON h.parking_area_id = pa.parking_area_id
+		AND h.day_of_week = (ARRAY['SUN','MON','TUE','WED','THU','FRI','SAT']::day_of_week_enum[])[
+			EXTRACT(DOW FROM (NOW() AT TIME ZONE 'Asia/Bangkok'))::int + 1
+		]
+	LEFT JOIN (
+		SELECT DISTINCT ON (entity_id)
+			entity_id,
+			storage_path AS photo_url
+		FROM place_images
+		WHERE entity_type = 'place'
+			AND NULLIF(BTRIM(storage_path), '') IS NOT NULL
+		ORDER BY entity_id, is_primary DESC, created_at
+	) img ON img.entity_id = pl.place_id::text
+	LEFT JOIN LATERAL (
+		SELECT ps.photo_urls[1] AS photo_url
+		FROM place_submissions ps
+		WHERE img.photo_url IS NULL
+			AND ps.place_id = pl.place_id
+			AND ps.status = 'approved'
+			AND COALESCE(cardinality(ps.photo_urls), 0) > 0
+			AND NULLIF(BTRIM(ps.photo_urls[1]), '') IS NOT NULL
+		ORDER BY ps.created_at DESC
+		LIMIT 1
+	) sub ON true
 	LEFT JOIN (
 		SELECT
 			place_id,
@@ -125,6 +126,75 @@ func (r *postgresRepo) ListMapPlaces(ctx context.Context) ([]Place, error) {
 		return nil, fmt.Errorf("decode map places: %w", err)
 	}
 	return places, nil
+}
+
+const getMapPlaceCardSQL = `
+SELECT json_build_object(
+	'place_id', pl.place_id::text,
+	'photo_urls', COALESCE((
+		SELECT json_agg(img.storage_path ORDER BY img.is_primary DESC, img.created_at)
+		FROM place_images img
+		WHERE img.entity_type = 'place'
+			AND img.entity_id = pl.place_id::text
+			AND NULLIF(BTRIM(img.storage_path), '') IS NOT NULL
+	), COALESCE((
+		SELECT to_json(ps.photo_urls)
+		FROM place_submissions ps
+		WHERE ps.place_id = pl.place_id
+			AND ps.status = 'approved'
+			AND COALESCE(cardinality(ps.photo_urls), 0) > 0
+		ORDER BY ps.created_at DESC
+		LIMIT 1
+	), '[]'::json)),
+	'hours', COALESCE((
+		SELECT json_agg(
+			json_build_object(
+				'day_of_week', h.day_of_week::text,
+				'open_time', CASE WHEN h.open_time IS NULL THEN NULL ELSE to_char(h.open_time, 'HH24:MI:SS') END,
+				'close_time', CASE WHEN h.close_time IS NULL THEN NULL ELSE to_char(h.close_time, 'HH24:MI:SS') END,
+				'is_closed', h.is_closed
+			)
+			ORDER BY h.day_of_week
+		)
+		FROM hours h
+		WHERE h.parking_area_id = (
+			SELECT pa.parking_area_id
+			FROM parking_area pa
+			WHERE pa.place_id = pl.place_id
+			ORDER BY pa.parking_area_id
+			LIMIT 1
+		)
+	), '[]'::json)
+)
+FROM places pl
+WHERE pl.place_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
+`
+
+func (r *postgresRepo) GetMapPlaceCard(ctx context.Context, placeID string) (*MapPlaceCard, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, getMapPlaceCardSQL, placeID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get map place card: %w", err)
+	}
+	if raw == nil || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var card MapPlaceCard
+	if err := json.Unmarshal(raw, &card); err != nil {
+		return nil, fmt.Errorf("decode map place card: %w", err)
+	}
+	if card.PhotoURLs == nil {
+		card.PhotoURLs = []string{}
+	}
+	if card.Hours == nil {
+		card.Hours = []Hour{}
+	}
+	return &card, nil
 }
 
 const getPlaceRateSQL = `

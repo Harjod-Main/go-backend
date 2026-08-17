@@ -19,11 +19,11 @@ const (
 )
 
 type updateParkingAmenitiesRequest struct {
-	HasCover         bool    `json:"hasCover"`
-	HasEvCharging    bool    `json:"hasEvCharging"`
-	HasValet         bool    `json:"hasValet"`
-	TotalSpaces      *int    `json:"totalSpaces"`
-	TransitAccess    bool    `json:"transitAccess"`
+	HasCover          bool    `json:"hasCover"`
+	HasEvCharging     bool    `json:"hasEvCharging"`
+	HasValet          bool    `json:"hasValet"`
+	TotalSpaces       *int    `json:"totalSpaces"`
+	TransitAccess     bool    `json:"transitAccess"`
 	TransitAccessType *string `json:"transitAccessType"`
 }
 
@@ -93,13 +93,13 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateParkingAmenities(c.Request.Context(), placeID, UpdateParkingAmenitiesInput{
-		HasCover:         body.HasCover,
-		HasEvCharging:    body.HasEvCharging,
-		HasValet:         body.HasValet,
-		TotalSpaces:      totalSpaces,
-		TransitAccess:    body.TransitAccess,
+		HasCover:          body.HasCover,
+		HasEvCharging:     body.HasEvCharging,
+		HasValet:          body.HasValet,
+		TotalSpaces:       totalSpaces,
+		TransitAccess:     body.TransitAccess,
 		TransitAccessType: transitAccessType,
-		ChangedBy:       claims.Sub,
+		ChangedBy:         claims.Sub,
 	})
 	if err != nil {
 		slog.Error("update parking amenities failed", "place_id", placeID, "error", err)
@@ -119,6 +119,8 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 		})
 		return
 	}
+
+	h.listCache.invalidate()
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {
@@ -147,4 +149,3 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 		},
 	})
 }
-
