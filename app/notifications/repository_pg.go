@@ -206,7 +206,8 @@ func (r *postgresRepo) Enqueue(ctx context.Context, userID string, evt Notificat
 	if err != nil {
 		return fmt.Errorf("marshal notification job: %w", err)
 	}
-	if _, err := r.pool.Exec(ctx, enqueueNotificationJobSQL, userID, payload); err != nil {
+	// pgx encodes []byte as bytea; pass a string so $2::jsonb gets valid JSON text.
+	if _, err := r.pool.Exec(ctx, enqueueNotificationJobSQL, userID, string(payload)); err != nil {
 		return fmt.Errorf("enqueue notification job: %w", err)
 	}
 	return nil
