@@ -11,9 +11,11 @@ type NotificationPreferencesRepository interface {
 type PushTokensRepository interface {
 	UpsertWebPushSubscription(ctx context.Context, userID string, req WebPushSubscriptionRequest) error
 	DeleteWebPushSubscription(ctx context.Context, userID string, endpoint string) error
+	DeleteWebPushSubscriptions(ctx context.Context, userID string, endpoints []string) error
 
 	UpsertIOSPushToken(ctx context.Context, userID string, req IOSPushTokenRequest) error
 	DeleteIOSPushToken(ctx context.Context, userID string, token string) error
+	DeleteIOSPushTokens(ctx context.Context, userID string, tokens []string) error
 
 	GetPreferences(ctx context.Context, userID string) (*NotificationPreferences, error)
 	ListWebPushSubscriptions(ctx context.Context, userID string) ([]WebPushSubscriptionRequest, error)
@@ -25,4 +27,3 @@ type NotificationsRepository interface {
 	NotificationPreferencesRepository
 	PushTokensRepository
 }
-

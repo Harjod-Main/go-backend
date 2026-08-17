@@ -67,6 +67,10 @@ func TestClassifyHTTPStatus(t *testing.T) {
 	err := classifyHTTPStatus("expo", 400)
 	r.Error(err)
 	r.False(errors.Is(err, errProviderOutage))
+	r.False(errors.Is(classifyHTTPStatus("webpush", 410), errStalePushDestination))
+	r.True(isGoneHTTPStatus(404))
+	r.True(isGoneHTTPStatus(410))
+	r.False(isGoneHTTPStatus(403))
 }
 
 func TestProviderGate_BoundsConcurrency(t *testing.T) {

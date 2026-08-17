@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	errCircuitOpen    = errors.New("push provider circuit open")
-	errProviderOutage = errors.New("push provider outage")
+	errCircuitOpen          = errors.New("push provider circuit open")
+	errProviderOutage       = errors.New("push provider outage")
+	errStalePushDestination = errors.New("stale push destination")
 )
 
 const (
@@ -150,6 +151,10 @@ func classifyHTTPStatus(provider string, status int) error {
 		return errors.Join(errProviderOutage, err)
 	}
 	return err
+}
+
+func isGoneHTTPStatus(status int) bool {
+	return status == 404 || status == 410
 }
 
 type providerGate struct {

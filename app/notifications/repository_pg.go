@@ -133,13 +133,21 @@ func (r *postgresRepo) ListWebPushSubscriptions(ctx context.Context, userID stri
 }
 
 func (r *postgresRepo) DeleteWebPushSubscription(ctx context.Context, userID string, endpoint string) error {
+	return r.DeleteWebPushSubscriptions(ctx, userID, []string{endpoint})
+}
+
+func (r *postgresRepo) DeleteWebPushSubscriptions(ctx context.Context, userID string, endpoints []string) error {
+	endpoints = uniqueStrings(endpoints)
+	if len(endpoints) == 0 {
+		return nil
+	}
 	const sql = `
 		DELETE FROM web_push_subscriptions
-		WHERE user_id = $1::uuid AND endpoint = $2
+		WHERE user_id = $1::uuid AND endpoint = ANY($2::text[])
 	`
-	_, err := r.pool.Exec(ctx, sql, userID, endpoint)
+	_, err := r.pool.Exec(ctx, sql, userID, endpoints)
 	if err != nil {
-		return fmt.Errorf("delete web push subscription: %w", err)
+		return fmt.Errorf("delete web push subscriptions: %w", err)
 	}
 	return nil
 }
@@ -185,13 +193,21 @@ func (r *postgresRepo) ListIOSPushTokens(ctx context.Context, userID string) ([]
 }
 
 func (r *postgresRepo) DeleteIOSPushToken(ctx context.Context, userID string, token string) error {
+	return r.DeleteIOSPushTokens(ctx, userID, []string{token})
+}
+
+func (r *postgresRepo) DeleteIOSPushTokens(ctx context.Context, userID string, tokens []string) error {
+	tokens = uniqueStrings(tokens)
+	if len(tokens) == 0 {
+		return nil
+	}
 	const sql = `
 		DELETE FROM ios_push_tokens
-		WHERE user_id = $1::uuid AND token = $2
+		WHERE user_id = $1::uuid AND token = ANY($2::text[])
 	`
-	_, err := r.pool.Exec(ctx, sql, userID, token)
+	_, err := r.pool.Exec(ctx, sql, userID, tokens)
 	if err != nil {
-		return fmt.Errorf("delete iOS push token: %w", err)
+		return fmt.Errorf("delete iOS push tokens: %w", err)
 	}
 	return nil
 }

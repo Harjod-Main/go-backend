@@ -42,12 +42,18 @@ func (s *stubRepo) UpsertWebPushSubscription(_ context.Context, _ string, req no
 func (s *stubRepo) DeleteWebPushSubscription(context.Context, string, string) error {
 	return nil
 }
+func (s *stubRepo) DeleteWebPushSubscriptions(context.Context, string, []string) error {
+	return nil
+}
 func (s *stubRepo) UpsertIOSPushToken(_ context.Context, _ string, req notifications.IOSPushTokenRequest) error {
 	s.upsertIOSCalled = true
 	s.lastToken = req.Token
 	return nil
 }
 func (s *stubRepo) DeleteIOSPushToken(context.Context, string, string) error { return nil }
+func (s *stubRepo) DeleteIOSPushTokens(context.Context, string, []string) error {
+	return nil
+}
 func (s *stubRepo) ListWebPushSubscriptions(context.Context, string) ([]notifications.WebPushSubscriptionRequest, error) {
 	return nil, nil
 }
