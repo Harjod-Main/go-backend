@@ -17,93 +17,39 @@ const listMapPlacesSQL = `
 SELECT COALESCE(json_agg(row_to_json(p) ORDER BY p.name_th), '[]'::json)
 FROM (
 	SELECT
-		pl.place_id::text AS place_id,
-		pl.name_th,
-		pl.name_en,
-		pl.place_type::text AS place_type,
-		pl.latitude::float8 AS latitude,
-		pl.longitude::float8 AS longitude,
-		pl.address_th,
-		pl.district_th,
-		pl.province_th,
-		pl.postal_code,
-		COALESCE(img.photo_url, sub.photo_url) AS photo_url,
-		rev.avg_rating,
-		COALESCE(rev.review_count, 0) AS review_count,
-		pa.has_ev_charging,
-		pa.has_valet,
-		pa.has_cover,
-		pa.transit_access,
-		pa.transit_access_type,
-		pa.total_spaces,
-		r.free_minutes,
-		COALESCE(tier.min_hourly_rate, tier.min_flat_rate) AS min_hourly_rate,
+		pin.place_id::text AS place_id,
+		pin.name_th,
+		pin.name_en,
+		pin.place_type::text AS place_type,
+		pin.latitude::float8 AS latitude,
+		pin.longitude::float8 AS longitude,
+		pin.address_th,
+		pin.district_th,
+		pin.province_th,
+		pin.postal_code,
+		pin.photo_url,
+		pin.avg_rating,
+		pin.review_count,
+		pin.has_ev_charging,
+		pin.has_valet,
+		pin.has_cover,
+		pin.transit_access,
+		pin.transit_access_type,
+		pin.total_spaces,
+		pin.free_minutes,
+		pin.min_hourly_rate,
 		CASE WHEN h.open_time IS NULL THEN NULL ELSE to_char(h.open_time, 'HH24:MI:SS') END AS today_open_time,
 		CASE WHEN h.close_time IS NULL THEN NULL ELSE to_char(h.close_time, 'HH24:MI:SS') END AS today_close_time,
 		h.is_closed AS today_is_closed
-	FROM places pl
-	LEFT JOIN (
-		SELECT DISTINCT ON (place_id)
-			place_id,
-			parking_area_id,
-			total_spaces,
-			has_ev_charging,
-			has_valet,
-			has_cover,
-			transit_access,
-			transit_access_type
-		FROM parking_area
-		ORDER BY place_id, parking_area_id
-	) pa ON pa.place_id = pl.place_id
-	LEFT JOIN (
-		SELECT DISTINCT ON (parking_area_id)
-			parking_area_id,
-			rate_id,
-			free_minutes
-		FROM rate
-		ORDER BY parking_area_id, rate_id
-	) r ON r.parking_area_id = pa.parking_area_id
-	LEFT JOIN (
-		SELECT
-			rate_id,
-			MIN(price) FILTER (WHERE unit::text = 'hourly')::float8 AS min_hourly_rate,
-			MIN(price) FILTER (WHERE unit::text = 'flat')::float8 AS min_flat_rate
-		FROM rate_tier
-		GROUP BY rate_id
-	) tier ON tier.rate_id = r.rate_id
-	LEFT JOIN hours h ON h.parking_area_id = pa.parking_area_id
+	FROM map_place_pins pin
+	LEFT JOIN hours h ON h.parking_area_id = pin.parking_area_id
 		AND h.day_of_week = (ARRAY['SUN','MON','TUE','WED','THU','FRI','SAT']::day_of_week_enum[])[
 			EXTRACT(DOW FROM (NOW() AT TIME ZONE 'Asia/Bangkok'))::int + 1
 		]
-	LEFT JOIN (
-		SELECT DISTINCT ON (entity_id)
-			entity_id,
-			storage_path AS photo_url
-		FROM place_images
-		WHERE entity_type = 'place'
-			AND NULLIF(BTRIM(storage_path), '') IS NOT NULL
-		ORDER BY entity_id, is_primary DESC, created_at
-	) img ON img.entity_id = pl.place_id::text
-	LEFT JOIN LATERAL (
-		SELECT ps.photo_urls[1] AS photo_url
-		FROM place_submissions ps
-		WHERE img.photo_url IS NULL
-			AND ps.place_id = pl.place_id
-			AND ps.status = 'approved'
-			AND COALESCE(cardinality(ps.photo_urls), 0) > 0
-			AND NULLIF(BTRIM(ps.photo_urls[1]), '') IS NOT NULL
-		ORDER BY ps.created_at DESC
-		LIMIT 1
-	) sub ON true
-	LEFT JOIN (
-		SELECT
-			place_id,
-			ROUND(AVG(rating)::numeric, 1)::float8 AS avg_rating,
-			COUNT(*)::int AS review_count
-		FROM reviews
-		GROUP BY place_id
-	) rev ON rev.place_id = pl.place_id
-	WHERE COALESCE(pl.is_blacklisted, false) = false
+	WHERE CASE
+		WHEN $1::float8 IS NULL THEN true
+		ELSE pin.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)::geography
+	END
 ) p
 `
 
@@ -115,9 +61,13 @@ func NewPostgresRepo(pool *pgxpool.Pool) Repository {
 	return &postgresRepo{pool: pool}
 }
 
-func (r *postgresRepo) ListMapPlaces(ctx context.Context) ([]Place, error) {
+func (r *postgresRepo) ListMapPlaces(ctx context.Context, bounds *MapBounds) ([]Place, error) {
+	var west, south, east, north any
+	if bounds != nil {
+		west, south, east, north = bounds.West, bounds.South, bounds.East, bounds.North
+	}
 	var raw []byte
-	if err := r.pool.QueryRow(ctx, listMapPlacesSQL).Scan(&raw); err != nil {
+	if err := r.pool.QueryRow(ctx, listMapPlacesSQL, west, south, east, north).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("list map places: %w", err)
 	}
 
@@ -126,6 +76,13 @@ func (r *postgresRepo) ListMapPlaces(ctx context.Context) ([]Place, error) {
 		return nil, fmt.Errorf("decode map places: %w", err)
 	}
 	return places, nil
+}
+
+func (r *postgresRepo) RefreshMapPlacePins(ctx context.Context) error {
+	if _, err := r.pool.Exec(ctx, `SELECT public.refresh_map_place_pins()`); err != nil {
+		return fmt.Errorf("refresh map place pins: %w", err)
+	}
+	return nil
 }
 
 const getMapPlaceCardSQL = `

@@ -120,7 +120,7 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 		return
 	}
 
-	h.listCache.invalidate()
+	h.invalidateMapList(c.Request.Context())
 
 	pointsAwarded := 0
 	if firstCorrection && h.profiles != nil {

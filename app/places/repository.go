@@ -4,7 +4,8 @@ import "context"
 
 // Repository loads place rows for the map list.
 type Repository interface {
-	ListMapPlaces(ctx context.Context) ([]Place, error)
+	ListMapPlaces(ctx context.Context, bounds *MapBounds) ([]Place, error)
+	RefreshMapPlacePins(ctx context.Context) error
 	GetMapPlaceCard(ctx context.Context, placeID string) (*MapPlaceCard, error)
 	GetPlaceRate(ctx context.Context, placeID string) (*PlaceRateDetail, error)
 	UpdateRate(ctx context.Context, placeID string, in UpdateRateInput) (*PlaceRateDetail, bool, error)

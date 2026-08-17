@@ -41,15 +41,19 @@ type stubRepo struct {
 	lastReserveUpdate *places.UpdateReservedInput
 	lastEVUpdate      *places.UpdateEVInput
 	updatedEV         *places.EVCharger
+	lastBounds        *places.MapBounds
 }
 
-func (s *stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
+func (s *stubRepo) ListMapPlaces(_ context.Context, bounds *places.MapBounds) ([]places.Place, error) {
 	s.listCalls.Add(1)
+	s.lastBounds = bounds
 	if s.err != nil {
 		return nil, s.err
 	}
 	return s.places, nil
 }
+
+func (s *stubRepo) RefreshMapPlacePins(context.Context) error { return nil }
 
 func (s *stubRepo) GetMapPlaceCard(context.Context, string) (*places.MapPlaceCard, error) {
 	if s.err != nil {
@@ -468,6 +472,42 @@ func TestList_RepoError(t *testing.T) {
 	}
 	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
 	r.Equal(string(app.CodeInternalError), body.Code)
+}
+
+func TestList_RejectsIncompleteBounds(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{places: samplePlaces()}})
+	engine.GET("/api/v1/places", handler.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places?west=100.4&south=13.7&east=100.6", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	r.Equal(http.StatusBadRequest, w.Code)
+}
+
+func TestList_ViewportSkipsSharedCache(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{places: samplePlaces()}
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo})
+	engine.GET("/api/v1/places", handler.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places?west=100.45&south=13.70&east=100.60&north=13.80", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal("public, max-age=15", w.Header().Get("Cache-Control"))
+	r.NotNil(repo.lastBounds)
+	r.Equal(100.45, repo.lastBounds.West)
+	r.Equal(13.80, repo.lastBounds.North)
+
+	engine.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/places?west=100.45&south=13.70&east=100.60&north=13.80", nil))
+	r.Equal(int32(2), repo.listCalls.Load())
 }
 
 func floatPtr(v float64) *float64 { return &v }
