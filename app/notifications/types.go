@@ -21,9 +21,9 @@ type IOSPushTokenRequest struct {
 }
 
 type NotificationPreferences struct {
-	NotificationsEnabled bool
-	InAppAlertsEnabled   bool
-	InAppSoundsEnabled   bool
+	NotificationsEnabled bool `json:"notificationsEnabled"`
+	InAppAlertsEnabled   bool `json:"inAppAlertsEnabled"`
+	InAppSoundsEnabled   bool `json:"inAppSoundsEnabled"`
 }
 
 // NotificationEvent is a high-level event from the app domain (check-in, review, submission, privilege).

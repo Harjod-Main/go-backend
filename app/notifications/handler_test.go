@@ -21,6 +21,7 @@ type stubRepo struct {
 	upsertPrefsCalled   bool
 	lastEndpoint        string
 	lastToken           string
+	prefs               *notifications.NotificationPreferences
 }
 
 func (s *stubRepo) UpsertPreferences(context.Context, string, notifications.NotificationPreferencesRequest) error {
@@ -28,6 +29,9 @@ func (s *stubRepo) UpsertPreferences(context.Context, string, notifications.Noti
 	return nil
 }
 func (s *stubRepo) GetPreferences(context.Context, string) (*notifications.NotificationPreferences, error) {
+	if s.prefs != nil {
+		return s.prefs, nil
+	}
 	return &notifications.NotificationPreferences{}, nil
 }
 func (s *stubRepo) UpsertWebPushSubscription(_ context.Context, _ string, req notifications.WebPushSubscriptionRequest) error {
@@ -173,6 +177,30 @@ func TestUpsertIOSPushToken_RejectsLongTokenAndOversizedBody(t *testing.T) {
 	})
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(oversized.upsertIOSCalled)
+}
+
+func TestGetPreferences_JSONUsesCamelCase(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{
+		prefs: &notifications.NotificationPreferences{
+			NotificationsEnabled: true,
+			InAppAlertsEnabled:   false,
+			InAppSoundsEnabled:   true,
+		},
+	}
+	h := notifications.NewHandler(notifications.HandlerConfig{Repo: repo})
+	w := perform(t, http.MethodGet, "/api/v1/me/notification-preferences", h.GetPreferences, nil)
+	r.Equal(http.StatusOK, w.Code)
+
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal(true, body.Data["notificationsEnabled"])
+	r.Equal(false, body.Data["inAppAlertsEnabled"])
+	r.Equal(true, body.Data["inAppSoundsEnabled"])
+	_, hasPascal := body.Data["NotificationsEnabled"]
+	r.False(hasPascal)
 }
 
 func TestDeleteWebPush_RejectsLongEndpoint(t *testing.T) {
