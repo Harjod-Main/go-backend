@@ -396,3 +396,161 @@ func TestUpdateReserved_PersistsSignagePhotos(t *testing.T) {
 	r.Equal([]string{photo}, *repo.lastReserveUpdate.SignagePhotos)
 }
 
+func TestGetPrivilegeDetail_EV(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	rule := "Members only"
+	floor := "B2"
+	charger := &places.EVCharger{
+		EVChargerID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+		PlaceID:     "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		Floor:       &floor,
+		Conditions:  &rule,
+		EVProvider:  &places.EVProvider{Name: "EA Anywhere"},
+		EVConnector: []places.EVConnector{{ConnectorType: "AC_Type_2"}},
+		SignagePhotos: []string{
+			testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/ev.jpg",
+		},
+	}
+
+	engine := gin.New()
+	handler := places.NewHandler(places.HandlerConfig{Repo: &stubRepo{evCharger: charger}})
+	engine.GET("/api/v1/privileges/:kind/:id", handler.GetPrivilegeDetail)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/privileges/ev/"+charger.EVChargerID, nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	var body struct {
+		Data places.EVCharger `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal("EA Anywhere", body.Data.EVProvider.Name)
+	r.Equal(charger.PlaceID, body.Data.PlaceID)
+	r.Equal(rule, *body.Data.Conditions)
+	r.Equal(charger.SignagePhotos, body.Data.SignagePhotos)
+}
+
+func TestUpdateEV_Success(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	chargerID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo: &stubRepo{
+			evCharger: &places.EVCharger{
+				EVChargerID: chargerID,
+				EVProvider:  &places.EVProvider{Name: "Tesla Supercharger"},
+			},
+			firstCorrection: true,
+		},
+		Profiles: &stubProfiles{total: 10},
+	})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/ev/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateEV(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"providerName": "ea_anywhere",
+		"connectors":   []map[string]string{{"connectorType": "TYPE_2", "total": "2"}},
+		"rule":         "Free for members",
+		"location":     "B2",
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/privileges/ev/"+chargerID, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	var body struct {
+		Data places.EVCorrectionResult `json:"data"`
+	}
+	r.NoError(json.Unmarshal(w.Body.Bytes(), &body))
+	r.Equal("EA Anywhere", body.Data.EVCharger.EVProvider.Name)
+	r.Equal("B2", *body.Data.EVCharger.Floor)
+	r.Equal("Free for members", *body.Data.EVCharger.Conditions)
+	r.Len(body.Data.EVCharger.EVConnector, 2)
+	r.Equal(10, body.Data.PointsAwarded)
+}
+
+func TestUpdateEV_PersistsSignagePhotos(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	chargerID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	photo := testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/ev.jpg"
+	repo := &stubRepo{
+		evCharger: &places.EVCharger{EVChargerID: chargerID},
+	}
+	handler := places.NewHandler(places.HandlerConfig{Repo: repo, Profiles: &stubProfiles{total: 10}})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/ev/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateEV(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"providerName":  "tesla",
+		"connectors":    []map[string]string{{"connectorType": "TESLA", "total": "1"}},
+		"signagePhotos": []string{photo},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/privileges/ev/"+chargerID, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.NotNil(repo.lastEVUpdate)
+	r.NotNil(repo.lastEVUpdate.SignagePhotos)
+	r.Equal([]string{photo}, *repo.lastEVUpdate.SignagePhotos)
+}
+
+func TestUpdateEV_RejectsInvalidSignagePhotos(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo: &stubRepo{
+			evCharger: &places.EVCharger{EVChargerID: "cccccccc-cccc-cccc-cccc-cccccccccccc"},
+		},
+	})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/ev/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateEV(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"providerName":  "ea_anywhere",
+		"connectors":    []map[string]string{{"connectorType": "TYPE_2", "total": "1"}},
+		"signagePhotos": []string{"https://evil.example.com/not-allowed.jpg"},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/privileges/ev/cccccccc-cccc-cccc-cccc-cccccccccccc",
+		bytes.NewReader(payload),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusBadRequest, w.Code)
+}
+
+

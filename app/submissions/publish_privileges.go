@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+
+	"github.com/RinTanth/go-backend/app/mediaurl"
 )
+
+const maxPrivilegeSignagePhotos = 5
 
 type stampEntryDraft struct {
 	ID    string           `json:"id"`
@@ -153,6 +157,10 @@ func mapStampEntry(value stampValueDraft) (publishedStamp, bool) {
 	if parsed := parseMoney(&value.SpendingUpTo); parsed != nil {
 		minSpend = *parsed
 	}
+	signagePhotos, ok := cleanMediaURLs(value.SignagePhotos)
+	if !ok {
+		return publishedStamp{}, false
+	}
 
 	out := publishedStamp{
 		ValidationType:     validationType,
@@ -160,7 +168,7 @@ func mapStampEntry(value stampValueDraft) (publishedStamp, bool) {
 		ValidationLocation: location,
 		FreeMinutes:        freeMinutes,
 		MinSpend:           minSpend,
-		SignagePhotos:      cleanURLs(value.SignagePhotos),
+		SignagePhotos:      signagePhotos,
 	}
 
 	switch category {
@@ -232,13 +240,17 @@ func mapReservedEntry(value reservedValueDraft) (publishedReserved, bool) {
 	if programOther == nil {
 		return publishedReserved{}, false
 	}
+	signagePhotos, ok := cleanMediaURLs(value.SignagePhotos)
+	if !ok {
+		return publishedReserved{}, false
+	}
 
 	return publishedReserved{
 		ReservationType: reservationType,
 		ProgramOther:    programOther,
 		Conditions:      trimToPtr(value.Rule),
 		Floor:           trimToPtr(value.Location),
-		SignagePhotos:   cleanURLs(value.SignagePhotos),
+		SignagePhotos:   signagePhotos,
 	}, true
 }
 
@@ -269,13 +281,17 @@ func mapEVEntry(value evValueDraft) (publishedEV, bool) {
 	if len(connectors) == 0 {
 		return publishedEV{}, false
 	}
+	signagePhotos, ok := cleanMediaURLs(value.SignagePhotos)
+	if !ok {
+		return publishedEV{}, false
+	}
 
 	return publishedEV{
 		ProviderName:  providerName,
 		Floor:         trimToPtr(value.Location),
 		Rule:          trimToPtr(value.Rule),
 		Connectors:    connectors,
-		SignagePhotos: cleanURLs(value.SignagePhotos),
+		SignagePhotos: signagePhotos,
 	}, true
 }
 
@@ -380,6 +396,19 @@ func cleanURLs(values []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+// cleanMediaURLs trims, enforces max count, and requires Harjod media-bucket URLs
+// (same rules as PATCH privilege signage). Empty input is valid.
+func cleanMediaURLs(values []string) ([]string, bool) {
+	out := cleanURLs(values)
+	if len(out) > maxPrivilegeSignagePhotos {
+		return nil, false
+	}
+	if !mediaurl.ValidMediaURLs(out, mediaurl.MaxURLLen) {
+		return nil, false
+	}
+	return out, true
 }
 
 func firstNonEmpty(values ...string) string {

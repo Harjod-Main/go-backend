@@ -132,10 +132,10 @@ RETURNING ev_provider_id::text
 
 const insertEVChargerSQL = `
 INSERT INTO ev_charger (
-	place_id, parking_area_id, ev_provider_id, floor, latitude, longitude, geom
+	place_id, parking_area_id, ev_provider_id, floor, conditions, latitude, longitude, geom
 ) VALUES (
-	$1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
-	ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography
+	$1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7,
+	ST_SetSRID(ST_MakePoint($7, $6), 4326)::geography
 )
 RETURNING ev_charger_id::text
 `
@@ -563,6 +563,7 @@ func publishEVCharges(
 			parkingAreaID,
 			providerID,
 			item.Floor,
+			item.Rule,
 			latitude,
 			longitude,
 		).Scan(&chargerID); err != nil {

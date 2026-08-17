@@ -1,6 +1,16 @@
 package submissions
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/RinTanth/go-backend/app/mediaurl"
+)
+
+const testMediaPrefix = "https://sycwdwymeirxowbrqdgd.supabase.co/storage/v1/object/public/media/"
+
+func init() {
+	mediaurl.Configure("https://sycwdwymeirxowbrqdgd.supabase.co")
+}
 
 func TestMapPlaceType(t *testing.T) {
 	parking := "parking"
@@ -65,8 +75,9 @@ func TestParseMoney(t *testing.T) {
 }
 
 func TestParseStampEntries(t *testing.T) {
+	goodPhoto := testMediaPrefix + "11111111-1111-1111-1111-111111111111/submissions/a.jpg"
 	raw := []byte(`[
-		{"id":"1","value":{"category":"spending","spendingUpTo":"500","freeHour":"2","stampLocation":"G Floor","signagePhotos":["https://x/a.jpg"]}},
+		{"id":"1","value":{"category":"spending","spendingUpTo":"500","freeHour":"2","stampLocation":"G Floor","signagePhotos":["` + goodPhoto + `"]}},
 		{"id":"2","value":{"category":"bank_card","bankName":"scb","cardName":"visa","stampLocation":"B1"}},
 		{"id":"3","value":{"category":"unknown"}}
 	]`)
@@ -80,8 +91,79 @@ func TestParseStampEntries(t *testing.T) {
 	if got[0].FreeMinutes == nil || *got[0].FreeMinutes != 120 {
 		t.Fatalf("unexpected free minutes: %+v", got[0].FreeMinutes)
 	}
+	if len(got[0].SignagePhotos) != 1 || got[0].SignagePhotos[0] != goodPhoto {
+		t.Fatalf("unexpected signage: %+v", got[0].SignagePhotos)
+	}
 	if got[1].ValidationType != "credential" || got[1].ProgramName == nil || *got[1].ProgramName != "Visa" {
 		t.Fatalf("unexpected bank stamp: %+v", got[1])
+	}
+}
+
+func TestParseStampEntries_RejectsForeignSignageURL(t *testing.T) {
+	raw := []byte(`[
+		{"id":"1","value":{"category":"spending","spendingUpTo":"500","freeHour":"2","signagePhotos":["https://evil.example.com/a.jpg"]}},
+		{"id":"2","value":{"category":"spending","spendingUpTo":"300","freeHour":"1"}}
+	]`)
+	got := parseStampEntries(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected only stamp without evil URL, got %d", len(got))
+	}
+	if got[0].ConditionDescription != "300" {
+		t.Fatalf("unexpected stamp kept: %+v", got[0])
+	}
+}
+
+func TestParseReservedEntries_RejectsForeignSignageURL(t *testing.T) {
+	raw := []byte(`[
+		{"id":"1","value":{"category":"credit_card","creditCardName":"SCB","signagePhotos":["https://evil.example.com/x.jpg"]}},
+		{"id":"2","value":{"category":"credit_card","creditCardName":"SCB M Visa","rule":"2 hrs","location":"1F"}}
+	]`)
+	got := parseReservedEntries(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 reserved, got %d", len(got))
+	}
+	if got[0].ProgramOther == nil || *got[0].ProgramOther != "SCB M Visa" {
+		t.Fatalf("unexpected reserved: %+v", got[0])
+	}
+}
+
+func TestParseEVEntries_RejectsForeignSignageURL(t *testing.T) {
+	raw := []byte(`[
+		{"id":"1","value":{
+			"providerName":"ea_anywhere",
+			"signagePhotos":["https://evil.example.com/ev.jpg"],
+			"connectors":[{"id":"c1","connectorType":"TYPE_2","total":"1"}]
+		}},
+		{"id":"2","value":{
+			"providerName":"ea_anywhere",
+			"location":"B2",
+			"connectors":[{"id":"c1","connectorType":"TYPE_2","total":"1"}]
+		}}
+	]`)
+	got := parseEVEntries(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 EV, got %d", len(got))
+	}
+	if got[0].Floor == nil || *got[0].Floor != "B2" {
+		t.Fatalf("unexpected EV kept: %+v", got[0])
+	}
+}
+
+func TestCleanMediaURLs_RejectsTooMany(t *testing.T) {
+	urls := make([]string, maxPrivilegeSignagePhotos+1)
+	for i := range urls {
+		urls[i] = testMediaPrefix + "u/submissions/" + string(rune('a'+i)) + ".jpg"
+	}
+	if _, ok := cleanMediaURLs(urls); ok {
+		t.Fatal("expected too many photos to fail")
+	}
+	if _, ok := cleanMediaURLs(nil); !ok {
+		t.Fatal("empty signage should be allowed")
+	}
+	good := []string{testMediaPrefix + "u/submissions/a.jpg"}
+	got, ok := cleanMediaURLs(good)
+	if !ok || len(got) != 1 {
+		t.Fatalf("expected valid media URL to pass, got %v ok=%v", got, ok)
 	}
 }
 

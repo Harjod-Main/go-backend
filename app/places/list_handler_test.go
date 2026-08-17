@@ -37,6 +37,8 @@ type stubRepo struct {
 	updateErr         error
 	lastStampUpdate   *places.UpdateValidationInput
 	lastReserveUpdate *places.UpdateReservedInput
+	lastEVUpdate      *places.UpdateEVInput
+	updatedEV         *places.EVCharger
 }
 
 func (s *stubRepo) ListMapPlaces(context.Context) ([]places.Place, error) {
@@ -185,6 +187,37 @@ func (s *stubRepo) GetEVCharger(context.Context, string) (*places.EVCharger, err
 		return nil, s.detailErr
 	}
 	return s.evCharger, nil
+}
+
+func (s *stubRepo) UpdateEVCharger(
+	_ context.Context,
+	_ string,
+	in places.UpdateEVInput,
+) (*places.EVCharger, bool, error) {
+	copied := in
+	s.lastEVUpdate = &copied
+	if s.updateErr != nil {
+		return nil, false, s.updateErr
+	}
+	if s.updatedEV != nil {
+		return s.updatedEV, s.firstCorrection, nil
+	}
+	if s.evCharger == nil {
+		return nil, false, nil
+	}
+	updated := *s.evCharger
+	updated.Floor = in.Floor
+	updated.Conditions = in.Conditions
+	updated.EVProvider = &places.EVProvider{Name: in.ProviderName}
+	connectors := make([]places.EVConnector, 0, len(in.Connectors))
+	for _, connector := range in.Connectors {
+		connectors = append(connectors, places.EVConnector{ConnectorType: connector.ConnectorType})
+	}
+	updated.EVConnector = connectors
+	if in.SignagePhotos != nil {
+		updated.SignagePhotos = append([]string{}, *in.SignagePhotos...)
+	}
+	return &updated, s.firstCorrection, nil
 }
 
 func (s *stubRepo) GetParkingAreaForPlace(context.Context, string) (*places.ParkingAreaRef, error) {

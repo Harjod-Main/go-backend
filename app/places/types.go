@@ -82,6 +82,7 @@ type ValidationParking struct {
 
 type Validation struct {
 	ValidationID         string           `json:"validation_id"`
+	PlaceID              string           `json:"place_id,omitempty"`
 	ValidationType       string           `json:"validation_type"`
 	ConditionDescription string           `json:"condition_description"`
 	ValidationLocation   *string          `json:"validation_location"`
@@ -192,6 +193,7 @@ type CreatePrivilegeInput struct {
 
 type Reserved struct {
 	ReservedID           string   `json:"reserved_id"`
+	PlaceID              string   `json:"place_id,omitempty"`
 	ReservationType      string   `json:"reservation_type"`
 	ReservationTypeOther *string  `json:"reservation_type_other"`
 	ProgramOther         *string  `json:"program_other"`
@@ -204,10 +206,13 @@ type Reserved struct {
 }
 
 type EVCharger struct {
-	EVChargerID string        `json:"ev_charger_id"`
-	Floor       *string       `json:"floor"`
-	EVProvider  *EVProvider   `json:"ev_provider"`
-	EVConnector []EVConnector `json:"ev_connector"`
+	EVChargerID   string        `json:"ev_charger_id"`
+	PlaceID       string        `json:"place_id,omitempty"`
+	Floor         *string       `json:"floor"`
+	Conditions    *string       `json:"conditions"`
+	EVProvider    *EVProvider   `json:"ev_provider"`
+	EVConnector   []EVConnector `json:"ev_connector"`
+	SignagePhotos []string      `json:"signage_photos"`
 }
 
 type EVProvider struct {
@@ -216,6 +221,27 @@ type EVProvider struct {
 
 type EVConnector struct {
 	ConnectorType string `json:"connector_type"`
+}
+
+type UpdateEVInput struct {
+	ProviderName string
+	Floor        *string
+	Conditions   *string
+	Connectors   []EVConnectorDraft
+	ChangedBy    string
+	// SignagePhotos nil = leave existing images; non-nil replaces them (empty clears).
+	SignagePhotos *[]string
+}
+
+type EVConnectorDraft struct {
+	ConnectorType string
+	PowerType     string
+	PowerKW       int
+}
+
+type EVCorrectionResult struct {
+	EVCharger     EVCharger `json:"ev_charger"`
+	PointsAwarded int       `json:"points_awarded"`
 }
 
 type PlaceReactionKind string

@@ -463,6 +463,245 @@ func mapReserveCategoryToReservationType(category string) (string, bool) {
 	}
 }
 
+type updateEVConnectorRequest struct {
+	ConnectorType string `json:"connectorType"`
+	Total         string `json:"total"`
+}
+
+type updateEVRequest struct {
+	ProviderName  string                     `json:"providerName"`
+	Connectors    []updateEVConnectorRequest `json:"connectors"`
+	Rule          *string                    `json:"rule"`
+	Location      *string                    `json:"location"`
+	SignagePhotos *[]string                  `json:"signagePhotos"`
+}
+
+const maxEVConnectors = 20
+
+// UpdateEV handles PATCH /api/v1/privileges/ev/:id (auth required).
+func (h *Handler) UpdateEV(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if _, err := uuid.Parse(id); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxStampCorrectionBodyBytes)
+	var body updateEVRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	providerName := normalizeEVProviderName(body.ProviderName)
+	if providerName == "" {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	connectors, ok := expandEVConnectors(body.Connectors)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	rule := trimOptional(body.Rule, maxConditionDescriptionLen)
+	if body.Rule != nil && rule == nil && strings.TrimSpace(*body.Rule) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+	floor := trimOptional(body.Location, maxStampLocationLen)
+	if body.Location != nil && floor == nil && strings.TrimSpace(*body.Location) != "" {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	signagePhotos, ok := parsePrivilegeSignagePhotos(body.SignagePhotos)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusBadRequest,
+			Code:       app.CodeBadRequest,
+			Message:    app.MessageBadRequest,
+		})
+		return
+	}
+
+	if h.profiles != nil {
+		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
+			slog.Error("ensure profile before ev correction failed", "user_id", claims.Sub, "error", err)
+			wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+				HTTPStatus: http.StatusInternalServerError,
+				Code:       app.CodeInternalError,
+				Message:    app.MessageInternalError,
+			})
+			return
+		}
+	}
+
+	updated, firstCorrection, err := h.repo.UpdateEVCharger(c.Request.Context(), id, UpdateEVInput{
+		ProviderName:  providerName,
+		Floor:         floor,
+		Conditions:    rule,
+		Connectors:    connectors,
+		ChangedBy:     claims.Sub,
+		SignagePhotos: signagePhotos,
+	})
+	if err != nil {
+		slog.Error("update ev charger failed", "ev_charger_id", id, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if updated == nil {
+		wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+			HTTPStatus: http.StatusNotFound,
+			Code:       app.CodeNotFound,
+			Message:    app.MessageNotFound,
+		})
+		return
+	}
+
+	pointsAwarded := 0
+	if firstCorrection && h.profiles != nil {
+		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, points.PrivilegeCorrection); err != nil {
+			slog.Error("award ev correction points failed", "user_id", claims.Sub, "error", err)
+		} else {
+			pointsAwarded = points.PrivilegeCorrection
+		}
+	}
+
+	wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
+		HTTPStatus: http.StatusOK,
+		Code:       app.CodeSuccess,
+		Message:    app.MessageSuccess,
+		Data: &EVCorrectionResult{
+			EVCharger:     *updated,
+			PointsAwarded: pointsAwarded,
+		},
+	})
+}
+
+func normalizeEVProviderName(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if label, ok := evProviderLabels[strings.ToLower(trimmed)]; ok {
+		return label
+	}
+	return trimmed
+}
+
+func expandEVConnectors(items []updateEVConnectorRequest) ([]EVConnectorDraft, bool) {
+	if len(items) == 0 {
+		return nil, false
+	}
+	out := make([]EVConnectorDraft, 0, len(items))
+	for _, item := range items {
+		mapped, ok := mapEVConnectorType(item.ConnectorType)
+		if !ok {
+			return nil, false
+		}
+		count := parsePositiveInt(item.Total, 0)
+		if count < 1 {
+			return nil, false
+		}
+		for i := 0; i < count; i++ {
+			out = append(out, mapped)
+			if len(out) > maxEVConnectors {
+				return nil, false
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+func mapEVConnectorType(raw string) (EVConnectorDraft, bool) {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "TYPE_1", "TYPE_2":
+		return EVConnectorDraft{ConnectorType: "AC_Type_2", PowerType: "AC", PowerKW: 7}, true
+	case "TESLA":
+		return EVConnectorDraft{ConnectorType: "Tesla", PowerType: "DC", PowerKW: 150}, true
+	case "CCS1", "CCS2":
+		return EVConnectorDraft{ConnectorType: "CCS2", PowerType: "DC", PowerKW: 50}, true
+	case "CHADEMO":
+		return EVConnectorDraft{ConnectorType: "CHAdeMO", PowerType: "DC", PowerKW: 50}, true
+	default:
+		return EVConnectorDraft{}, false
+	}
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return fallback
+	}
+	n := 0
+	for _, r := range trimmed {
+		if r < '0' || r > '9' {
+			return fallback
+		}
+		n = n*10 + int(r-'0')
+		if n > 20 {
+			return 20
+		}
+	}
+	if n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+var evProviderLabels = map[string]string{
+	"ea_anywhere":   "EA Anywhere",
+	"pea_volta":     "PEA VOLTA",
+	"elex_egat":     "EleX by EGAT",
+	"tesla":         "Tesla Supercharger",
+	"ptt_evstation": "PTT EV Station PluZ",
+	"onion":         "Onion EV Charging",
+}
+
 type createPrivilegeRequest struct {
 	Kind  string          `json:"kind"`
 	Value json.RawMessage `json:"value"`

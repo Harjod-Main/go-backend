@@ -17,6 +17,7 @@ type Repository interface {
 	GetReserved(ctx context.Context, reservedID string) (*Reserved, error)
 	UpdateReserved(ctx context.Context, reservedID string, in UpdateReservedInput) (*Reserved, bool, error)
 	GetEVCharger(ctx context.Context, evChargerID string) (*EVCharger, error)
+	UpdateEVCharger(ctx context.Context, evChargerID string, in UpdateEVInput) (*EVCharger, bool, error)
 	GetParkingAreaForPlace(ctx context.Context, placeID string) (*ParkingAreaRef, error)
 	CreatePrivilege(ctx context.Context, in CreatePrivilegeInput) error
 	PlaceExists(ctx context.Context, placeID string) (bool, error)
