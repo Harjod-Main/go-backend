@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
-	"github.com/RinTanth/go-backend/app/points"
-	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -79,17 +77,8 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 		}
 	}
 
-	if h.profiles != nil {
-		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
-			slog.Error("ensure profile before amenities correction failed", "user_id", claims.Sub, "error", err)
-			wrapper.Respond(c, wrapper.ResponseOption[ParkingAmenitiesCorrectionResult]{
-				HTTPStatus: http.StatusInternalServerError,
-				Code:       app.CodeInternalError,
-				Message:    app.MessageInternalError,
-			})
-			return
-		}
+	if !h.ensureProfile(c, claims, "amenities correction") {
+		return
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateParkingAmenities(c.Request.Context(), placeID, UpdateParkingAmenitiesInput{
@@ -122,20 +111,7 @@ func (h *Handler) UpdateParkingAmenities(c *gin.Context) {
 
 	h.invalidateMapList(c.Request.Context())
 
-	pointsAwarded := 0
-	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
-			Amount:     points.PrivilegeCorrection,
-			Reason:     points.ReasonCorrection,
-			SourceType: "parking_area",
-			SourceID:   placeID,
-			PlaceID:    profile.OptionalPlaceID(placeID),
-		}); err != nil {
-			slog.Error("award amenities correction points failed", "user_id", claims.Sub, "error", err)
-		} else {
-			pointsAwarded = points.PrivilegeCorrection
-		}
-	}
+	pointsAwarded := h.awardCorrectionPoints(c, claims.Sub, firstCorrection, "parking_area", placeID, placeID, "amenities correction")
 
 	// Note: we always return success because repo UpdateParkingAmenities already
 	// performed DB work and this flow is user-facing. If you want strict 404

@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
-	"github.com/RinTanth/go-backend/app/points"
-	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
 	"github.com/gin-gonic/gin"
@@ -196,17 +194,8 @@ func (h *Handler) UpdateRate(c *gin.Context) {
 
 	notes := joinSpecialConditions(specialConditions)
 
-	if h.profiles != nil {
-		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
-			slog.Error("ensure profile before rate correction failed", "user_id", claims.Sub, "error", err)
-			wrapper.Respond(c, wrapper.ResponseOption[RateCorrectionResult]{
-				HTTPStatus: http.StatusInternalServerError,
-				Code:       app.CodeInternalError,
-				Message:    app.MessageInternalError,
-			})
-			return
-		}
+	if !h.ensureProfile(c, claims, "rate correction") {
+		return
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateRate(c.Request.Context(), placeID, UpdateRateInput{
@@ -237,20 +226,7 @@ func (h *Handler) UpdateRate(c *gin.Context) {
 
 	h.invalidateMapList(c.Request.Context())
 
-	pointsAwarded := 0
-	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
-			Amount:     points.PrivilegeCorrection,
-			Reason:     points.ReasonCorrection,
-			SourceType: "rate",
-			SourceID:   placeID,
-			PlaceID:    profile.OptionalPlaceID(placeID),
-		}); err != nil {
-			slog.Error("award rate correction points failed", "user_id", claims.Sub, "error", err)
-		} else {
-			pointsAwarded = points.PrivilegeCorrection
-		}
-	}
+	pointsAwarded := h.awardCorrectionPoints(c, claims.Sub, firstCorrection, "rate", placeID, placeID, "rate correction")
 
 	wrapper.Respond(c, wrapper.ResponseOption[RateCorrectionResult]{
 		HTTPStatus: http.StatusOK,

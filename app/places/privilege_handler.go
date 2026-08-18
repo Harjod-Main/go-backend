@@ -9,8 +9,8 @@ import (
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
 	"github.com/RinTanth/go-backend/app/mediaurl"
-	"github.com/RinTanth/go-backend/app/points"
 	"github.com/RinTanth/go-backend/app/notifications"
+	"github.com/RinTanth/go-backend/app/points"
 	"github.com/RinTanth/go-backend/app/profile"
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -134,6 +134,40 @@ func respondPrivilegeDetail[T any](c *gin.Context, kind, id string, payload *T, 
 	})
 }
 
+func (h *Handler) ensureProfile(c *gin.Context, claims *supabaseauth.Claims, action string) bool {
+	if h.profiles == nil {
+		return true
+	}
+	seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+	if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
+		slog.Error("ensure profile before "+action+" failed", "user_id", claims.Sub, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) awardCorrectionPoints(c *gin.Context, userID string, firstCorrection bool, sourceType, sourceID, placeID, action string) int {
+	if !firstCorrection || h.profiles == nil {
+		return 0
+	}
+	if _, err := h.profiles.AddCreditPoints(c.Request.Context(), userID, profile.CreditAward{
+		Amount:     points.PrivilegeCorrection,
+		Reason:     points.ReasonCorrection,
+		SourceType: sourceType,
+		SourceID:   sourceID,
+		PlaceID:    profile.OptionalPlaceID(placeID),
+	}); err != nil {
+		slog.Error("award "+action+" points failed", "user_id", userID, "error", err)
+		return 0
+	}
+	return points.PrivilegeCorrection
+}
+
 // UpdateStamp handles PATCH /api/v1/privileges/stamp/:id (auth required).
 func (h *Handler) UpdateStamp(c *gin.Context) {
 	claims, ok := supabaseauth.ClaimsFromGin(c)
@@ -224,17 +258,8 @@ func (h *Handler) UpdateStamp(c *gin.Context) {
 		return
 	}
 
-	if h.profiles != nil {
-		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
-			slog.Error("ensure profile before stamp correction failed", "user_id", claims.Sub, "error", err)
-			wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
-				HTTPStatus: http.StatusInternalServerError,
-				Code:       app.CodeInternalError,
-				Message:    app.MessageInternalError,
-			})
-			return
-		}
+	if !h.ensureProfile(c, claims, "stamp correction") {
+		return
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateValidation(c.Request.Context(), id, UpdateValidationInput{
@@ -263,20 +288,7 @@ func (h *Handler) UpdateStamp(c *gin.Context) {
 		return
 	}
 
-	pointsAwarded := 0
-	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
-			Amount:     points.PrivilegeCorrection,
-			Reason:     points.ReasonCorrection,
-			SourceType: "validation",
-			SourceID:   id,
-			PlaceID:    profile.OptionalPlaceID(updated.PlaceID),
-		}); err != nil {
-			slog.Error("award stamp correction points failed", "user_id", claims.Sub, "error", err)
-		} else {
-			pointsAwarded = points.PrivilegeCorrection
-		}
-	}
+	pointsAwarded := h.awardCorrectionPoints(c, claims.Sub, firstCorrection, "validation", id, updated.PlaceID, "stamp correction")
 
 	wrapper.Respond(c, wrapper.ResponseOption[StampCorrectionResult]{
 		HTTPStatus: http.StatusOK,
@@ -397,17 +409,8 @@ func (h *Handler) UpdateReserved(c *gin.Context) {
 		return
 	}
 
-	if h.profiles != nil {
-		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
-			slog.Error("ensure profile before reserved correction failed", "user_id", claims.Sub, "error", err)
-			wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
-				HTTPStatus: http.StatusInternalServerError,
-				Code:       app.CodeInternalError,
-				Message:    app.MessageInternalError,
-			})
-			return
-		}
+	if !h.ensureProfile(c, claims, "reserved correction") {
+		return
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateReserved(c.Request.Context(), id, UpdateReservedInput{
@@ -436,20 +439,7 @@ func (h *Handler) UpdateReserved(c *gin.Context) {
 		return
 	}
 
-	pointsAwarded := 0
-	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
-			Amount:     points.PrivilegeCorrection,
-			Reason:     points.ReasonCorrection,
-			SourceType: "reserved",
-			SourceID:   id,
-			PlaceID:    profile.OptionalPlaceID(updated.PlaceID),
-		}); err != nil {
-			slog.Error("award reserved correction points failed", "user_id", claims.Sub, "error", err)
-		} else {
-			pointsAwarded = points.PrivilegeCorrection
-		}
-	}
+	pointsAwarded := h.awardCorrectionPoints(c, claims.Sub, firstCorrection, "reserved", id, updated.PlaceID, "reserved correction")
 
 	wrapper.Respond(c, wrapper.ResponseOption[ReservedCorrectionResult]{
 		HTTPStatus: http.StatusOK,
@@ -572,17 +562,8 @@ func (h *Handler) UpdateEV(c *gin.Context) {
 		return
 	}
 
-	if h.profiles != nil {
-		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
-			slog.Error("ensure profile before ev correction failed", "user_id", claims.Sub, "error", err)
-			wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
-				HTTPStatus: http.StatusInternalServerError,
-				Code:       app.CodeInternalError,
-				Message:    app.MessageInternalError,
-			})
-			return
-		}
+	if !h.ensureProfile(c, claims, "ev correction") {
+		return
 	}
 
 	updated, firstCorrection, err := h.repo.UpdateEVCharger(c.Request.Context(), id, UpdateEVInput{
@@ -611,20 +592,7 @@ func (h *Handler) UpdateEV(c *gin.Context) {
 		return
 	}
 
-	pointsAwarded := 0
-	if firstCorrection && h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
-			Amount:     points.PrivilegeCorrection,
-			Reason:     points.ReasonCorrection,
-			SourceType: "ev_charger",
-			SourceID:   id,
-			PlaceID:    profile.OptionalPlaceID(updated.PlaceID),
-		}); err != nil {
-			slog.Error("award ev correction points failed", "user_id", claims.Sub, "error", err)
-		} else {
-			pointsAwarded = points.PrivilegeCorrection
-		}
-	}
+	pointsAwarded := h.awardCorrectionPoints(c, claims.Sub, firstCorrection, "ev_charger", id, updated.PlaceID, "ev correction")
 
 	wrapper.Respond(c, wrapper.ResponseOption[EVCorrectionResult]{
 		HTTPStatus: http.StatusOK,
@@ -795,17 +763,8 @@ func (h *Handler) CreatePrivilege(c *gin.Context) {
 		return
 	}
 
-	if h.profiles != nil {
-		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
-		if _, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed); err != nil {
-			slog.Error("ensure profile before privilege create failed", "user_id", claims.Sub, "error", err)
-			wrapper.Respond(c, wrapper.ResponseOption[any]{
-				HTTPStatus: http.StatusInternalServerError,
-				Code:       app.CodeInternalError,
-				Message:    app.MessageInternalError,
-			})
-			return
-		}
+	if !h.ensureProfile(c, claims, "privilege create") {
+		return
 	}
 
 	if err := h.repo.CreatePrivilege(c.Request.Context(), CreatePrivilegeInput{
