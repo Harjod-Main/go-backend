@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -177,6 +178,31 @@ func TestMe_DoesNotCreateMissingProfile(t *testing.T) {
 	r.Equal("11111111-1111-1111-1111-111111111111", body.Data.UserID)
 	r.Equal("user@example.com", body.Data.Email)
 	r.Empty(body.Data.Username)
+}
+
+func TestMe_Returns500WhenOAuthSyncFails(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubProfileRepo{getErr: errors.New("db down")}
+	handler := auth.NewHandler(auth.HandlerConfig{ProfileRepo: repo})
+
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub:   "11111111-1111-1111-1111-111111111111",
+			Email: "user@example.com",
+			Role:  "authenticated",
+		})
+		c.Next()
+	})
+	engine.GET("/api/v1/auth/me", handler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusInternalServerError, w.Code)
 }
 
 func TestMe_BackfillsExistingProfileFromOAuth(t *testing.T) {

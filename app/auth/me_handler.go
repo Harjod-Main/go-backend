@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -42,15 +43,19 @@ func (h *Handler) Me(c *gin.Context) {
 	if h.profileRepo != nil {
 		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
 		p, err := h.profileRepo.SyncFromOAuth(c.Request.Context(), claims.Sub, claims.Email, seed)
-		if err != nil {
-			if err != profile.ErrNotFound {
-				slog.Error("sync profile on /me failed", "user_id", claims.Sub, "error", err)
-			}
-		} else if p != nil {
+		if err == nil && p != nil {
 			resp.DisplayName = p.DisplayName
 			resp.Username = p.Username
 			resp.AvatarURL = p.AvatarURL
 			resp.CreditPoints = p.CreditPoints
+		} else if err != nil && !errors.Is(err, profile.ErrNotFound) {
+			slog.Error("sync profile on /me failed", "user_id", claims.Sub, "error", err)
+			wrapper.Respond(c, wrapper.ResponseOption[MeResponse]{
+				HTTPStatus: http.StatusInternalServerError,
+				Code:       app.CodeInternalError,
+				Message:    app.MessageInternalError,
+			})
+			return
 		}
 	}
 
