@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RinTanth/go-backend/app/points"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -364,6 +365,21 @@ func (r *postgresRepo) Create(ctx context.Context, s *Submission) error {
 	}
 
 	s.PlaceID = &placeID
+
+	if s.UserID == nil || strings.TrimSpace(*s.UserID) == "" {
+		return fmt.Errorf("award submission points: missing user id")
+	}
+	if err := points.Award(ctx, tx, points.Event{
+		UserID:     strings.TrimSpace(*s.UserID),
+		Amount:     points.PlaceSubmission,
+		Reason:     points.ReasonPlaceSubmission,
+		SourceType: "place_submission",
+		SourceID:   s.SubmissionID,
+		PlaceID:    s.PlaceID,
+		CreatedAt:  now,
+	}); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit publish tx: %w", err)

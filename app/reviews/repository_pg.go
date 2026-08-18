@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RinTanth/go-backend/app/pagination"
+	"github.com/RinTanth/go-backend/app/points"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,36 +22,50 @@ func NewPostgresRepo(pool *pgxpool.Pool) Repository {
 }
 
 const listByPlaceSQL = `
+WITH page AS (
+	SELECT
+		r.review_id,
+		r.place_id,
+		r.user_id,
+		r.display_name,
+		r.rating,
+		r.description,
+		r.photo_urls,
+		r.created_at
+	FROM reviews r
+	WHERE r.place_id = $1::uuid
+	  AND (
+	    $2::timestamptz IS NULL
+	    OR (r.created_at, r.review_id) < ($2::timestamptz, $3::uuid)
+	  )
+	ORDER BY r.created_at DESC, r.review_id DESC
+	LIMIT $4
+)
 SELECT
-	r.review_id::text,
-	r.place_id::text,
-	r.user_id::text,
-	r.display_name,
-	r.rating,
-	r.description,
-	r.photo_urls,
-	r.created_at,
+	p.review_id::text,
+	p.place_id::text,
+	p.user_id::text,
+	p.display_name,
+	p.rating,
+	p.description,
+	p.photo_urls,
+	p.created_at,
 	COALESCE(lc.like_count, 0)::int AS like_count,
 	CASE
 		WHEN $5::uuid IS NULL THEN false
 		ELSE EXISTS (
 			SELECT 1 FROM review_likes rl
-			WHERE rl.review_id = r.review_id AND rl.user_id = $5::uuid
+			WHERE rl.review_id = p.review_id AND rl.user_id = $5::uuid
 		)
 	END AS liked_by_me
-FROM reviews r
+FROM page p
 LEFT JOIN (
-	SELECT review_id, COUNT(*)::int AS like_count
-	FROM review_likes
-	GROUP BY review_id
-) lc ON lc.review_id = r.review_id
-WHERE r.place_id = $1::uuid
-  AND (
-    $2::timestamptz IS NULL
-    OR (r.created_at, r.review_id) < ($2::timestamptz, $3::uuid)
-  )
-ORDER BY r.created_at DESC, r.review_id DESC
-LIMIT $4
+	SELECT rl.review_id, COUNT(*)::int AS like_count
+	FROM review_likes rl
+	WHERE rl.review_id IN (SELECT review_id FROM page)
+	GROUP BY rl.review_id
+) lc ON lc.review_id = p.review_id
+ORDER BY p.created_at DESC, p.review_id DESC
 `
 
 func (r *postgresRepo) ListByPlace(ctx context.Context, placeID string, limit int, cursor *pagination.Cursor, viewerUserID string) ([]Review, *string, error) {
@@ -118,7 +133,7 @@ RETURNING review_id::text
 `
 
 func (r *postgresRepo) Create(ctx context.Context, review *Review) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	review.CreatedAt = now
 
 	photos := review.PhotoURLs
@@ -126,7 +141,13 @@ func (r *postgresRepo) Create(ctx context.Context, review *Review) error {
 		photos = []string{}
 	}
 
-	return r.pool.QueryRow(ctx, insertReviewSQL,
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin review tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if err := tx.QueryRow(ctx, insertReviewSQL,
 		review.PlaceID,
 		review.UserID,
 		review.DisplayName,
@@ -134,7 +155,27 @@ func (r *postgresRepo) Create(ctx context.Context, review *Review) error {
 		review.Description,
 		photos,
 		now,
-	).Scan(&review.ReviewID)
+	).Scan(&review.ReviewID); err != nil {
+		return fmt.Errorf("insert review: %w", err)
+	}
+
+	placeID := review.PlaceID
+	if err := points.Award(ctx, tx, points.Event{
+		UserID:     review.UserID,
+		Amount:     points.ReviewCreate,
+		Reason:     points.ReasonReview,
+		SourceType: "review",
+		SourceID:   review.ReviewID,
+		PlaceID:    &placeID,
+		CreatedAt:  now,
+	}); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit review tx: %w", err)
+	}
+	return nil
 }
 
 const updateReviewSQL = `

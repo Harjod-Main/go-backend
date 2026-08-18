@@ -330,7 +330,7 @@ func TestCreate_DisplayNameUsesProfileDisplayName(t *testing.T) {
 	r.Equal("Jane Public Name", repo.created.DisplayName)
 }
 
-func TestCreate_DisplayNameFallsBackWhenProfileLookupFails(t *testing.T) {
+func TestCreate_EnsureProfileFailureReturns500(t *testing.T) {
 	r := require.New(t)
 	repo := &stubRepo{}
 	profiles := &stubProfiles{profileErr: context.DeadlineExceeded}
@@ -339,10 +339,9 @@ func TestCreate_DisplayNameFallsBackWhenProfileLookupFails(t *testing.T) {
 	r.NoError(err)
 
 	w := performCreateWithProfiles(t, repo, profiles, testPlaceID, payload, true)
-	r.Equal(http.StatusCreated, w.Code)
+	r.Equal(http.StatusInternalServerError, w.Code)
 	r.True(profiles.ensureCalled)
-	r.True(repo.createCalled)
-	r.Equal("jane.doe", repo.created.DisplayName)
+	r.False(repo.createCalled)
 }
 
 func TestCreate_DisplayNameFallsBackWhenProfileDisplayNameBlank(t *testing.T) {

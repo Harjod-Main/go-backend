@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
-	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/mediaurl"
+	"github.com/RinTanth/go-backend/app/notifications"
 	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/points"
 	"github.com/RinTanth/go-backend/app/profile"
@@ -25,20 +25,20 @@ const (
 )
 
 type HandlerConfig struct {
-	Repo     Repository
-	Profiles profile.Repository
+	Repo                Repository
+	Profiles            profile.Repository
 	NotificationsSender *notifications.Sender
 }
 
 type Handler struct {
-	repo     Repository
-	profiles profile.Repository
+	repo                Repository
+	profiles            profile.Repository
 	notificationsSender *notifications.Sender
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{
-		repo:                 cfg.Repo,
+		repo:                cfg.Repo,
 		profiles:            cfg.Profiles,
 		notificationsSender: cfg.NotificationsSender,
 	}
@@ -241,7 +241,15 @@ func (h *Handler) Create(c *gin.Context) {
 		}
 	}
 
-	displayName := h.resolveDisplayName(c, claims)
+	displayName, ok := h.resolveDisplayName(c, claims)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[Review]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
 
 	review := Review{
 		PlaceID:     placeID,
@@ -260,19 +268,6 @@ func (h *Handler) Create(c *gin.Context) {
 			Message:    app.MessageInternalError,
 		})
 		return
-	}
-
-	if h.profiles != nil {
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), claims.Sub, profile.CreditAward{
-			Amount:     points.ReviewCreate,
-			Reason:     points.ReasonReview,
-			SourceType: "review",
-			SourceID:   review.ReviewID,
-			PlaceID:    profile.OptionalPlaceID(placeID),
-		}); err != nil {
-			// Review is already persisted; log and continue so the user still gets their review.
-			slog.Error("award review points failed", "user_id", claims.Sub, "error", err)
-		}
 	}
 
 	if h.notificationsSender != nil {
@@ -398,28 +393,29 @@ func (h *Handler) Update(c *gin.Context) {
 }
 
 // resolveDisplayName prefers the user's profile display name, falling back to
-// the email local-part only if no profile repository is wired or the lookup
-// fails (matching the existing graceful-degradation pattern elsewhere).
-func (h *Handler) resolveDisplayName(c *gin.Context, claims *supabaseauth.Claims) string {
+// the email local-part when no profile repository is wired or the display name
+// is blank. A failed Ensure returns ok=false so Create can 500 before insert
+// (award runs in the same tx and needs a profile row).
+func (h *Handler) resolveDisplayName(c *gin.Context, claims *supabaseauth.Claims) (string, bool) {
 	fallback := claims.Email
 	if atIdx := strings.Index(fallback, "@"); atIdx > 0 {
 		fallback = fallback[:atIdx]
 	}
 
 	if h.profiles == nil {
-		return fallback
+		return fallback, true
 	}
 
 	seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
 	p, err := h.profiles.Ensure(c.Request.Context(), claims.Sub, claims.Email, seed)
 	if err != nil {
 		slog.Error("ensure profile before review failed", "user_id", claims.Sub, "error", err)
-		return fallback
+		return "", false
 	}
 
 	displayName := strings.TrimSpace(p.DisplayName)
 	if displayName == "" {
-		return fallback
+		return fallback, true
 	}
-	return displayName
+	return displayName, true
 }

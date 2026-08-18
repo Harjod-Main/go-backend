@@ -18,36 +18,36 @@ import (
 )
 
 const (
-	maxSubmissionBodyBytes       = 256 * 1024
-	maxSubmissionNameLen         = 160
-	maxSubmissionAddressLen      = 500
-	maxSubmissionAdminAreaLen    = 120
-	maxSubmissionPostalCodeLen   = 20
-	maxSubmissionPlaceTypeLen    = 80
+	maxSubmissionBodyBytes        = 256 * 1024
+	maxSubmissionNameLen          = 160
+	maxSubmissionAddressLen       = 500
+	maxSubmissionAdminAreaLen     = 120
+	maxSubmissionPostalCodeLen    = 20
+	maxSubmissionPlaceTypeLen     = 80
 	maxSubmissionGooglePlaceIDLen = 256
-	maxSubmissionMoneyFieldLen   = 80
-	maxSubmissionAmenities       = 32
-	maxSubmissionPhotos          = 10
-	maxSubmissionSpecials        = 32
-	maxSubmissionStringItemLen   = 200
-	maxSubmissionJSONSectionSize = 32 * 1024
+	maxSubmissionMoneyFieldLen    = 80
+	maxSubmissionAmenities        = 32
+	maxSubmissionPhotos           = 10
+	maxSubmissionSpecials         = 32
+	maxSubmissionStringItemLen    = 200
+	maxSubmissionJSONSectionSize  = 32 * 1024
 )
 
 type HandlerConfig struct {
-	Repo     Repository
-	Profiles profile.Repository
+	Repo                Repository
+	Profiles            profile.Repository
 	NotificationsSender *notifications.Sender
 }
 
 type Handler struct {
-	repo     Repository
-	profiles profile.Repository
+	repo                Repository
+	profiles            profile.Repository
 	notificationsSender *notifications.Sender
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{
-		repo:                 cfg.Repo,
+		repo:                cfg.Repo,
 		profiles:            cfg.Profiles,
 		notificationsSender: cfg.NotificationsSender,
 	}
@@ -249,6 +249,19 @@ func (h *Handler) Create(c *gin.Context) {
 		ParkingEvCharges:  body.ParkingEvCharges,
 	}
 
+	if h.profiles != nil {
+		seed := profile.OAuthSeedFromMetadata(claims.Email, claims.UserMetadata)
+		if _, err := h.profiles.Ensure(c.Request.Context(), uid, claims.Email, seed); err != nil {
+			slog.Error("ensure profile before submission failed", "user_id", uid, "error", err)
+			wrapper.Respond(c, wrapper.ResponseOption[Submission]{
+				HTTPStatus: http.StatusInternalServerError,
+				Code:       app.CodeInternalError,
+				Message:    app.MessageInternalError,
+			})
+			return
+		}
+	}
+
 	if err := h.repo.Create(c.Request.Context(), &submission); err != nil {
 		slog.Error("create place submission failed", "user_id", uid, "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[Submission]{
@@ -257,22 +270,6 @@ func (h *Handler) Create(c *gin.Context) {
 			Message:    app.MessageInternalError,
 		})
 		return
-	}
-
-	if h.profiles != nil {
-		placeID := ""
-		if submission.PlaceID != nil {
-			placeID = *submission.PlaceID
-		}
-		if _, err := h.profiles.AddCreditPoints(c.Request.Context(), uid, profile.CreditAward{
-			Amount:     points.PlaceSubmission,
-			Reason:     points.ReasonPlaceSubmission,
-			SourceType: "place_submission",
-			SourceID:   submission.SubmissionID,
-			PlaceID:    profile.OptionalPlaceID(placeID),
-		}); err != nil {
-			slog.Error("award submission points failed", "user_id", uid, "error", err)
-		}
 	}
 
 	if h.notificationsSender != nil {
