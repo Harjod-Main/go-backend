@@ -17,6 +17,7 @@ import (
 const (
 	maxPushAttempts       = 5
 	pushSendTimeout       = 15 * time.Second
+	pushQueueTimeout      = 5 * time.Second
 	pushPollEvery         = 2 * time.Second
 	pushStaleAfter        = 2 * time.Minute
 	pushCloseWait         = 18 * time.Second
@@ -234,8 +235,10 @@ func (s *Sender) processJob(job *NotificationJob) {
 	defer cancel()
 
 	err := s.deliver(sendCtx, job.UserID, job.Event)
+	qctx, qcancel := context.WithTimeout(context.Background(), pushQueueTimeout)
+	defer qcancel()
 	if err == nil {
-		if completeErr := s.queue.Complete(context.Background(), job.JobID); completeErr != nil {
+		if completeErr := s.queue.Complete(qctx, job.JobID); completeErr != nil {
 			slog.Error("complete notification job failed", "job_id", job.JobID, "error", completeErr)
 		}
 		return
@@ -254,7 +257,7 @@ func (s *Sender) processJob(job *NotificationJob) {
 			"attempts", attempts,
 			"error", err,
 		)
-		if failErr := s.queue.Fail(context.Background(), job.JobID, err.Error()); failErr != nil {
+		if failErr := s.queue.Fail(qctx, job.JobID, err.Error()); failErr != nil {
 			slog.Error("fail notification job failed", "job_id", job.JobID, "error", failErr)
 		}
 		return
@@ -273,7 +276,7 @@ func (s *Sender) processJob(job *NotificationJob) {
 		"next_attempt_at", next,
 		"error", err,
 	)
-	if retryErr := s.queue.Retry(context.Background(), job.JobID, attempts, next, err.Error()); retryErr != nil {
+	if retryErr := s.queue.Retry(qctx, job.JobID, attempts, next, err.Error()); retryErr != nil {
 		slog.Error("retry notification job failed", "job_id", job.JobID, "error", retryErr)
 	}
 }

@@ -144,6 +144,21 @@ func TestProcessJob_CompletesOnSuccess(t *testing.T) {
 	r.Empty(q.failed)
 }
 
+func TestProcessJob_RetriesWhenPreferencesFail(t *testing.T) {
+	r := require.New(t)
+	q := &stubQueue{}
+	s := newSender(&pushRepoStub{prefsErr: errors.New("db down")}, q, false)
+
+	s.processJob(&NotificationJob{
+		JobID:       "job-prefs",
+		UserID:      "u1",
+		Event:       NotificationEvent{Type: "review"},
+		MaxAttempts: 5,
+	})
+	r.Empty(q.complete)
+	r.Len(q.retried, 1)
+}
+
 func TestProcessJob_RetriesThenFails(t *testing.T) {
 	r := require.New(t)
 	q := &stubQueue{}
@@ -260,6 +275,7 @@ func TestProcessJob_CircuitOpenUsesCooldownRetry(t *testing.T) {
 type pushRepoStub struct {
 	mu               sync.Mutex
 	prefs            *NotificationPreferences
+	prefsErr         error
 	web              []WebPushSubscriptionRequest
 	ios              []IOSPushTokenRequest
 	deletedEndpoints []string
@@ -270,6 +286,9 @@ func (r *pushRepoStub) UpsertPreferences(context.Context, string, NotificationPr
 	return nil
 }
 func (r *pushRepoStub) GetPreferences(context.Context, string) (*NotificationPreferences, error) {
+	if r.prefsErr != nil {
+		return nil, r.prefsErr
+	}
 	if r.prefs != nil {
 		return r.prefs, nil
 	}

@@ -64,12 +64,15 @@ func (r *postgresRepo) GetPreferences(ctx context.Context, userID string) (*Noti
 		&prefs.InAppSoundsEnabled,
 	)
 	if err != nil {
-		// No preferences row yet => defaults.
-		return &NotificationPreferences{
-			NotificationsEnabled: false,
-			InAppAlertsEnabled:   true,
-			InAppSoundsEnabled:   false,
-		}, nil
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No preferences row yet => defaults.
+			return &NotificationPreferences{
+				NotificationsEnabled: false,
+				InAppAlertsEnabled:   true,
+				InAppSoundsEnabled:   false,
+			}, nil
+		}
+		return nil, fmt.Errorf("get notification preferences: %w", err)
 	}
 	return &prefs, nil
 }
