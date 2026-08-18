@@ -126,22 +126,6 @@ SELECT json_build_object(
 			ORDER BY pa.parking_area_id
 			LIMIT 1
 		)
-	), '[]'::json),
-	'entrances', COALESCE((
-		SELECT json_agg(
-			json_build_object(
-				'latitude', e.latitude::float8,
-				'longitude', e.longitude::float8,
-				'direction', e.direction::text
-			)
-			ORDER BY e.entrance_id
-		)
-		FROM entrance_exit e
-		INNER JOIN parking_area pa ON pa.parking_area_id = e.parking_area_id
-		WHERE pa.place_id = pl.place_id
-			AND e.latitude IS NOT NULL
-			AND e.longitude IS NOT NULL
-			AND e.direction::text IN ('entry', 'both')
 	), '[]'::json)
 )
 FROM places pl
@@ -171,9 +155,6 @@ func (r *postgresRepo) GetMapPlaceCard(ctx context.Context, placeID string) (*Ma
 	}
 	if card.Hours == nil {
 		card.Hours = []Hour{}
-	}
-	if card.Entrances == nil {
-		card.Entrances = []MapPlaceEntrance{}
 	}
 	return &card, nil
 }

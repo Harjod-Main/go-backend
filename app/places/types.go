@@ -33,10 +33,9 @@ type Place struct {
 
 // MapPlaceCard is hours + gallery for a selected pin (loaded on demand).
 type MapPlaceCard struct {
-	PlaceID   string             `json:"place_id"`
-	PhotoURLs []string           `json:"photo_urls"`
-	Hours     []Hour             `json:"hours"`
-	Entrances []MapPlaceEntrance `json:"entrances"`
+	PlaceID   string   `json:"place_id"`
+	PhotoURLs []string `json:"photo_urls"`
+	Hours     []Hour   `json:"hours"`
 }
 
 // MapPlaceEntrance is a drive-in gate used for turn-by-turn directions.
