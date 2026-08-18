@@ -1,6 +1,11 @@
 package places
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrPlaceNotFound = errors.New("place not found")
 
 // Repository loads place rows for the map list.
 type Repository interface {
@@ -14,6 +19,8 @@ type Repository interface {
 	// Missing / blacklisted places are omitted from the map (nil rate).
 	GetPlaceRates(ctx context.Context, placeIDs []string) (map[string]*PlaceRateDetail, error)
 	GetPlacePrivileges(ctx context.Context, placeID string) (*PlacePrivileges, error)
+	// WalkInStampFreeMinutes is the best no-spend stamp free minutes per place (-1 = fully free).
+	WalkInStampFreeMinutes(ctx context.Context, placeIDs []string) (map[string]int, error)
 	GetValidation(ctx context.Context, validationID string) (*Validation, error)
 	UpdateValidation(ctx context.Context, validationID string, in UpdateValidationInput) (*Validation, bool, error)
 	GetReserved(ctx context.Context, reservedID string) (*Reserved, error)

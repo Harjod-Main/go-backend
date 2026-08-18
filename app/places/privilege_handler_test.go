@@ -553,4 +553,96 @@ func TestUpdateEV_RejectsInvalidSignagePhotos(t *testing.T) {
 	r.Equal(http.StatusBadRequest, w.Code)
 }
 
+func TestCreatePrivilege_RejectsHiddenPlace(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
 
+	placeID := "11111111-1111-1111-1111-111111111111"
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo: &stubRepo{placeMissing: true},
+	})
+	engine := gin.New()
+	engine.POST("/api/v1/places/:placeId/privileges", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.CreatePrivilege(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"kind":  "stamp",
+		"value": map[string]any{"category": "SPENDING"},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/places/"+placeID+"/privileges", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusNotFound, w.Code)
+}
+
+func TestCreatePrivilege_RepoPlaceNotFound(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	placeID := "11111111-1111-1111-1111-111111111111"
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo: &stubRepo{createPrivilegeErr: places.ErrPlaceNotFound},
+	})
+	engine := gin.New()
+	engine.POST("/api/v1/places/:placeId/privileges", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.CreatePrivilege(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"kind":  "stamp",
+		"value": map[string]any{"category": "SPENDING"},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/places/"+placeID+"/privileges", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusNotFound, w.Code)
+}
+
+func TestUpdateStamp_NotFoundWhenMissing(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	handler := places.NewHandler(places.HandlerConfig{
+		Repo:     &stubRepo{},
+		Profiles: &stubProfiles{total: 10},
+	})
+	engine := gin.New()
+	engine.PATCH("/api/v1/privileges/stamp/:id", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.UpdateStamp(c)
+	})
+
+	payload, err := json.Marshal(map[string]any{
+		"category":              "OTHER",
+		"condition_description": "ฟรี 3 ชั่วโมงแรก",
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/privileges/stamp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		bytes.NewReader(payload),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusNotFound, w.Code)
+}

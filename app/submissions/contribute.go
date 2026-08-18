@@ -3,11 +3,14 @@ package submissions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrPlaceNotFound = errors.New("place not found")
 
 // ContributeInput publishes one community privilege onto an existing place.
 type ContributeInput struct {
@@ -49,6 +52,20 @@ func contributePrivilegeTx(
 	in ContributeInput,
 	wrapped json.RawMessage,
 ) error {
+	var visible bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM places
+			WHERE place_id = $1::uuid
+				AND COALESCE(is_blacklisted, false) = false
+		)
+	`, in.PlaceID).Scan(&visible); err != nil {
+		return fmt.Errorf("check place visible: %w", err)
+	}
+	if !visible {
+		return ErrPlaceNotFound
+	}
+
 	switch in.Kind {
 	case "stamp":
 		stamps := parseStampEntries(wrapped)

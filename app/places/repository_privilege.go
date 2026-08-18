@@ -152,6 +152,44 @@ func (r *postgresRepo) GetPlacePrivileges(ctx context.Context, placeID string) (
 	return &privileges, nil
 }
 
+const walkInStampFreeMinutesSQL = `
+SELECT
+	vp.place_id::text,
+	CASE
+		WHEN BOOL_OR(vt.free_minutes = -1) THEN -1
+		ELSE COALESCE(MAX(vt.free_minutes) FILTER (WHERE vt.free_minutes > 0), 0)
+	END
+FROM validation_parking vp
+INNER JOIN validation_tier vt ON vt.validation_id = vp.validation_id
+WHERE vp.place_id = ANY($1::uuid[])
+	AND COALESCE(vt.min_spend, 0) <= 0
+GROUP BY vp.place_id
+`
+
+func (r *postgresRepo) WalkInStampFreeMinutes(ctx context.Context, placeIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(placeIDs))
+	if len(placeIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, walkInStampFreeMinutesSQL, placeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("walk-in stamp free minutes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var placeID string
+		var minutes int
+		if err := rows.Scan(&placeID, &minutes); err != nil {
+			return nil, fmt.Errorf("scan walk-in stamp free minutes: %w", err)
+		}
+		out[placeID] = minutes
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate walk-in stamp free minutes: %w", err)
+	}
+	return out, nil
+}
+
 const getReservedSQL = `
 SELECT json_build_object(
 	'reserved_id', res.reserved_id::text,
@@ -178,8 +216,10 @@ SELECT json_build_object(
 )
 FROM reserved res
 INNER JOIN parking_area pa ON pa.parking_area_id = res.parking_area_id
+INNER JOIN places pl ON pl.place_id = pa.place_id
 LEFT JOIN program prog ON prog.program_id = res.program_id
 WHERE res.reserved_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
 `
 
 func (r *postgresRepo) GetReserved(ctx context.Context, reservedID string) (*Reserved, error) {
@@ -198,6 +238,13 @@ SET reservation_type = $2::reservation_type_enum,
     conditions = $4,
     floor = $5
 WHERE reserved_id = $1::uuid
+  AND EXISTS (
+    SELECT 1
+    FROM parking_area pa
+    INNER JOIN places pl ON pl.place_id = pa.place_id
+    WHERE pa.parking_area_id = reserved.parking_area_id
+      AND COALESCE(pl.is_blacklisted, false) = false
+  )
 `
 
 const hasReservedCorrectionSQL = `
@@ -280,10 +327,12 @@ func (r *postgresRepo) UpdateReserved(
 }
 
 const getParkingAreaForPlaceSQL = `
-SELECT parking_area_id::text, latitude::float8, longitude::float8
-FROM parking_area
-WHERE place_id = $1::uuid
-ORDER BY parking_area_id
+SELECT pa.parking_area_id::text, pa.latitude::float8, pa.longitude::float8
+FROM parking_area pa
+INNER JOIN places pl ON pl.place_id = pa.place_id
+WHERE pa.place_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
+ORDER BY pa.parking_area_id
 LIMIT 1
 `
 
@@ -305,7 +354,7 @@ func (r *postgresRepo) GetParkingAreaForPlace(ctx context.Context, placeID strin
 
 func (r *postgresRepo) CreatePrivilege(ctx context.Context, in CreatePrivilegeInput) error {
 	userID := in.UserID
-	return submissions.ContributePrivilege(ctx, r.pool, submissions.ContributeInput{
+	err := submissions.ContributePrivilege(ctx, r.pool, submissions.ContributeInput{
 		PlaceID:       in.PlaceID,
 		ParkingAreaID: in.ParkingAreaID,
 		Latitude:      in.Latitude,
@@ -314,4 +363,8 @@ func (r *postgresRepo) CreatePrivilege(ctx context.Context, in CreatePrivilegeIn
 		Kind:          in.Kind,
 		Value:         in.Value,
 	})
+	if errors.Is(err, submissions.ErrPlaceNotFound) {
+		return ErrPlaceNotFound
+	}
+	return err
 }

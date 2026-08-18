@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RinTanth/go-common/app"
 	"github.com/RinTanth/go-common/wrapper"
@@ -21,6 +22,29 @@ type quoteRequestBody struct {
 // maxQuoteHours caps stay duration on public quote endpoints (30 days).
 const maxQuoteHours = 720
 const maxCreateQuotesBodyBytes = 16 * 1024
+
+var quoteLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Bangkok")
+	if err != nil {
+		return time.FixedZone("ICT", 7*3600)
+	}
+	return loc
+}()
+
+func quoteNow() time.Time {
+	return time.Now().In(quoteLocation)
+}
+
+func (h *Handler) stampMinutes(c *gin.Context, placeIDs []string) (map[string]int, error) {
+	stamps, err := h.repo.WalkInStampFreeMinutes(c.Request.Context(), placeIDs)
+	if err != nil {
+		return nil, err
+	}
+	if stamps == nil {
+		return map[string]int{}, nil
+	}
+	return stamps, nil
+}
 
 func isValidQuoteHours(hours float64) bool {
 	return hours >= 0 && hours <= maxQuoteHours && !math.IsNaN(hours) && !math.IsInf(hours, 0)
@@ -59,7 +83,21 @@ func (h *Handler) GetQuote(c *gin.Context) {
 		return
 	}
 
-	quote := CalculateQuote(placeID, hours, rate)
+	stamps, err := h.stampMinutes(c, []string{placeID})
+	if err != nil {
+		slog.Error("quote stamp lookup failed", "place_id", placeID, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[Quote]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+
+	quote := CalculateQuoteOpts(placeID, hours, rate, QuoteOptions{
+		StampFreeMinutes: stamps[placeID],
+		Now:              quoteNow(),
+	})
 	wrapper.Respond(c, wrapper.ResponseOption[Quote]{
 		HTTPStatus: http.StatusOK,
 		Code:       app.CodeSuccess,
@@ -116,9 +154,24 @@ func (h *Handler) CreateQuotes(c *gin.Context) {
 		return
 	}
 
+	stamps, err := h.stampMinutes(c, placeIDs)
+	if err != nil {
+		slog.Error("batch quote stamp lookup failed", "count", len(placeIDs), "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[[]Quote]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+
+	now := quoteNow()
 	quotes := make([]Quote, 0, len(placeIDs))
 	for _, placeID := range placeIDs {
-		quotes = append(quotes, CalculateQuote(placeID, body.Hours, rates[placeID]))
+		quotes = append(quotes, CalculateQuoteOpts(placeID, body.Hours, rates[placeID], QuoteOptions{
+			StampFreeMinutes: stamps[placeID],
+			Now:              now,
+		}))
 	}
 
 	wrapper.Respond(c, wrapper.ResponseOption[[]Quote]{

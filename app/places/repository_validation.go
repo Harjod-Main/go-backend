@@ -42,8 +42,10 @@ SELECT json_build_object(
 )
 FROM validation v
 INNER JOIN validation_parking vp ON vp.validation_id = v.validation_id
+INNER JOIN places pl ON pl.place_id = vp.place_id
 LEFT JOIN program prog ON prog.program_id = v.program_id
 WHERE v.validation_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
 `
 
 func (r *postgresRepo) GetValidation(ctx context.Context, validationID string) (*Validation, error) {
@@ -61,6 +63,13 @@ SET validation_type = $2::validation_type_enum,
     notes = $4,
     validation_location = $5
 WHERE validation_id = $1::uuid
+  AND EXISTS (
+    SELECT 1
+    FROM validation_parking vp
+    INNER JOIN places pl ON pl.place_id = vp.place_id
+    WHERE vp.validation_id = validation.validation_id
+      AND COALESCE(pl.is_blacklisted, false) = false
+  )
 `
 
 const hasValidationCorrectionSQL = `

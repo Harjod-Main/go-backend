@@ -2,6 +2,7 @@ package places_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/RinTanth/go-backend/app/places"
 	"github.com/stretchr/testify/require"
@@ -108,4 +109,98 @@ func TestCalculateQuote_FlatTierOnce(t *testing.T) {
 	// 4 hours → flat 10 once for hours 0-1, then hourly 20 for hours 2 and 3 → 10+20+20=50
 	quote := places.CalculateQuote("p1", 4, rate)
 	r.Equal(int64(5000), quote.TotalSatang)
+}
+
+func TestCalculateQuote_WalkInStampAddsFreeMinutes(t *testing.T) {
+	r := require.New(t)
+	rate := &places.PlaceRateDetail{
+		FreeMinutes: intPtr(30),
+		Currency:    sPtr("THB"),
+		RateTier: []places.PlaceRateTier{
+			{TierOrder: 1, FromHour: 0, ToHour: f64Ptr(24), Price: 40, Unit: "hourly"},
+		},
+	}
+
+	quote := places.CalculateQuoteOpts("p1", 3, rate, places.QuoteOptions{StampFreeMinutes: 120})
+	r.Equal(150, quote.FreeMinutesApplied)
+	r.Equal(1.0, quote.ChargeableHours)
+	r.Equal(int64(4000), quote.TotalSatang)
+}
+
+func TestCalculateQuote_WalkInStampFullyFree(t *testing.T) {
+	r := require.New(t)
+	rate := &places.PlaceRateDetail{
+		FreeMinutes: intPtr(0),
+		Currency:    sPtr("THB"),
+		RateTier: []places.PlaceRateTier{
+			{TierOrder: 1, FromHour: 0, ToHour: f64Ptr(24), Price: 40, Unit: "hourly"},
+		},
+	}
+
+	quote := places.CalculateQuoteOpts("p1", 8, rate, places.QuoteOptions{StampFreeMinutes: -1})
+	r.Equal(-1, quote.FreeMinutesApplied)
+	r.Equal(int64(0), quote.TotalSatang)
+	r.False(quote.NightRateApplied)
+}
+
+func TestCalculateQuote_NightFeeWhenStayOverlapsWindow(t *testing.T) {
+	r := require.New(t)
+	rate := &places.PlaceRateDetail{
+		FreeMinutes:    intPtr(0),
+		NightRate:      f64Ptr(60),
+		NightStartTime: sPtr("22:00:00"),
+		NightEndTime:   sPtr("06:00:00"),
+		Currency:       sPtr("THB"),
+		RateTier: []places.PlaceRateTier{
+			{TierOrder: 1, FromHour: 0, ToHour: f64Ptr(24), Price: 40, Unit: "hourly"},
+		},
+	}
+	loc := time.FixedZone("ICT", 7*3600)
+	now := time.Date(2026, 8, 18, 21, 0, 0, 0, loc)
+
+	quote := places.CalculateQuoteOpts("p1", 3, rate, places.QuoteOptions{Now: now})
+	r.True(quote.NightRateApplied)
+	r.Equal(int64(12000+6000), quote.TotalSatang)
+}
+
+func TestCalculateQuote_NoNightFeeOutsideWindow(t *testing.T) {
+	r := require.New(t)
+	rate := &places.PlaceRateDetail{
+		FreeMinutes:    intPtr(0),
+		NightRate:      f64Ptr(60),
+		NightStartTime: sPtr("22:00:00"),
+		NightEndTime:   sPtr("06:00:00"),
+		Currency:       sPtr("THB"),
+		RateTier: []places.PlaceRateTier{
+			{TierOrder: 1, FromHour: 0, ToHour: f64Ptr(24), Price: 40, Unit: "hourly"},
+		},
+	}
+	loc := time.FixedZone("ICT", 7*3600)
+	now := time.Date(2026, 8, 18, 10, 0, 0, 0, loc)
+
+	quote := places.CalculateQuoteOpts("p1", 4, rate, places.QuoteOptions{Now: now})
+	r.False(quote.NightRateApplied)
+	r.Equal(int64(16000), quote.TotalSatang)
+}
+
+func TestCalculateQuote_NightFeeOnTopOfDailyMax(t *testing.T) {
+	r := require.New(t)
+	rate := &places.PlaceRateDetail{
+		FreeMinutes:    intPtr(0),
+		DailyMax:       f64Ptr(100),
+		NightRate:      f64Ptr(50),
+		NightStartTime: sPtr("22:00:00"),
+		NightEndTime:   sPtr("06:00:00"),
+		Currency:       sPtr("THB"),
+		RateTier: []places.PlaceRateTier{
+			{TierOrder: 1, FromHour: 0, ToHour: nil, Price: 50, Unit: "hourly"},
+		},
+	}
+	loc := time.FixedZone("ICT", 7*3600)
+	now := time.Date(2026, 8, 18, 20, 0, 0, 0, loc)
+
+	quote := places.CalculateQuoteOpts("p1", 5, rate, places.QuoteOptions{Now: now})
+	r.True(quote.DailyMaxApplied)
+	r.True(quote.NightRateApplied)
+	r.Equal(int64(10000+5000), quote.TotalSatang)
 }

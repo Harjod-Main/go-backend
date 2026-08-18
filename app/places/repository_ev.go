@@ -39,7 +39,9 @@ SELECT json_build_object(
 FROM ev_charger ev
 LEFT JOIN ev_provider ep ON ep.ev_provider_id = ev.ev_provider_id
 LEFT JOIN parking_area pa ON pa.parking_area_id = ev.parking_area_id
+INNER JOIN places pl ON pl.place_id = COALESCE(ev.place_id, pa.place_id)
 WHERE ev.ev_charger_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
 `
 
 func (r *postgresRepo) GetEVCharger(ctx context.Context, evChargerID string) (*EVCharger, error) {
@@ -59,6 +61,13 @@ SET ev_provider_id = $2::uuid,
     floor = $3,
     conditions = $4
 WHERE ev_charger_id = $1::uuid
+  AND EXISTS (
+    SELECT 1
+    FROM places pl
+    LEFT JOIN parking_area pa ON pa.parking_area_id = ev_charger.parking_area_id
+    WHERE pl.place_id = COALESCE(ev_charger.place_id, pa.place_id)
+      AND COALESCE(pl.is_blacklisted, false) = false
+  )
 `
 
 const deleteEVConnectorsSQL = `

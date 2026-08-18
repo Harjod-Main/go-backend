@@ -18,30 +18,33 @@ import (
 )
 
 type stubRepo struct {
-	places            []places.Place
-	card              *places.MapPlaceCard
-	err               error
-	listCalls         atomic.Int32
-	rate              *places.PlaceRateDetail
-	updatedRate       *places.PlaceRateDetail
-	amenities         *places.ParkingAmenitiesCorrectionResult
-	rates             map[string]*places.PlaceRateDetail
-	rateErr           error
-	ratesCalls        atomic.Int32
-	privileges        *places.PlacePrivileges
-	privilegesErr     error
-	validation        *places.Validation
-	reserved          *places.Reserved
-	evCharger         *places.EVCharger
-	detailErr         error
-	updatedValidation *places.Validation
-	firstCorrection   bool
-	updateErr         error
-	lastStampUpdate   *places.UpdateValidationInput
-	lastReserveUpdate *places.UpdateReservedInput
-	lastEVUpdate      *places.UpdateEVInput
-	updatedEV         *places.EVCharger
-	lastBounds        *places.MapBounds
+	places             []places.Place
+	card               *places.MapPlaceCard
+	err                error
+	listCalls          atomic.Int32
+	rate               *places.PlaceRateDetail
+	updatedRate        *places.PlaceRateDetail
+	amenities          *places.ParkingAmenitiesCorrectionResult
+	rates              map[string]*places.PlaceRateDetail
+	rateErr            error
+	ratesCalls         atomic.Int32
+	privileges         *places.PlacePrivileges
+	privilegesErr      error
+	validation         *places.Validation
+	reserved           *places.Reserved
+	evCharger          *places.EVCharger
+	detailErr          error
+	updatedValidation  *places.Validation
+	firstCorrection    bool
+	updateErr          error
+	lastStampUpdate    *places.UpdateValidationInput
+	lastReserveUpdate  *places.UpdateReservedInput
+	lastEVUpdate       *places.UpdateEVInput
+	updatedEV          *places.EVCharger
+	lastBounds         *places.MapBounds
+	stampFree          map[string]int
+	placeMissing       bool
+	createPrivilegeErr error
 }
 
 func (s *stubRepo) ListMapPlaces(_ context.Context, bounds *places.MapBounds) ([]places.Place, error) {
@@ -127,6 +130,16 @@ func (s *stubRepo) GetPlacePrivileges(context.Context, string) (*places.PlacePri
 		return nil, s.privilegesErr
 	}
 	return s.privileges, nil
+}
+
+func (s *stubRepo) WalkInStampFreeMinutes(_ context.Context, placeIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(placeIDs))
+	for _, id := range placeIDs {
+		if s.stampFree != nil {
+			out[id] = s.stampFree[id]
+		}
+	}
+	return out, nil
 }
 
 func (s *stubRepo) GetValidation(context.Context, string) (*places.Validation, error) {
@@ -242,11 +255,11 @@ func (s *stubRepo) GetParkingAreaForPlace(context.Context, string) (*places.Park
 }
 
 func (s *stubRepo) CreatePrivilege(context.Context, places.CreatePrivilegeInput) error {
-	return nil
+	return s.createPrivilegeErr
 }
 
 func (s *stubRepo) PlaceExists(context.Context, string) (bool, error) {
-	return true, nil
+	return !s.placeMissing, nil
 }
 
 func (s *stubRepo) GetPlaceReaction(context.Context, string, string) (*places.PlaceReactionResponse, error) {

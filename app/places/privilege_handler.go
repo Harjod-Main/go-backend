@@ -2,6 +2,7 @@ package places
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -744,6 +745,25 @@ func (h *Handler) CreatePrivilege(c *gin.Context) {
 		return
 	}
 
+	exists, err := h.repo.PlaceExists(c.Request.Context(), placeID)
+	if err != nil {
+		slog.Error("check place for privilege create failed", "place_id", placeID, "error", err)
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusInternalServerError,
+			Code:       app.CodeInternalError,
+			Message:    app.MessageInternalError,
+		})
+		return
+	}
+	if !exists {
+		wrapper.Respond(c, wrapper.ResponseOption[any]{
+			HTTPStatus: http.StatusNotFound,
+			Code:       app.CodeNotFound,
+			Message:    app.MessageNotFound,
+		})
+		return
+	}
+
 	area, err := h.repo.GetParkingAreaForPlace(c.Request.Context(), placeID)
 	if err != nil {
 		slog.Error("lookup parking area for privilege create failed", "place_id", placeID, "error", err)
@@ -776,6 +796,14 @@ func (h *Handler) CreatePrivilege(c *gin.Context) {
 		Kind:          kind,
 		Value:         body.Value,
 	}); err != nil {
+		if errors.Is(err, ErrPlaceNotFound) {
+			wrapper.Respond(c, wrapper.ResponseOption[any]{
+				HTTPStatus: http.StatusNotFound,
+				Code:       app.CodeNotFound,
+				Message:    app.MessageNotFound,
+			})
+			return
+		}
 		slog.Error("create privilege failed", "place_id", placeID, "kind", kind, "error", err)
 		msg := err.Error()
 		if strings.Contains(msg, "invalid ") || strings.Contains(msg, "unsupported ") || strings.Contains(msg, "missing ") {
