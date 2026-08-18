@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -12,12 +11,11 @@ import (
 	"github.com/RinTanth/go-backend/app/mediaurl"
 	"github.com/RinTanth/go-backend/app/pagination"
 	"github.com/RinTanth/go-backend/app/points"
+	"github.com/RinTanth/go-backend/app/username"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{3,30}$`)
 
 type postgresRepo struct {
 	pool *pgxpool.Pool
@@ -166,7 +164,7 @@ WHERE user_id = $1::uuid
 RETURNING user_id::text, display_name, username, avatar_url, credit_points, created_at, updated_at
 `
 
-func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, username *string, avatarURL *string, clearAvatar bool) (*Profile, error) {
+func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, nextUsername *string, avatarURL *string, clearAvatar bool) (*Profile, error) {
 	if displayName != nil {
 		trimmed := strings.TrimSpace(*displayName)
 		if trimmed == "" || len(trimmed) > 80 {
@@ -174,12 +172,12 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 		}
 		displayName = &trimmed
 	}
-	if username != nil {
-		trimmed := strings.TrimSpace(*username)
-		if !usernamePattern.MatchString(trimmed) {
+	if nextUsername != nil {
+		normalized, ok := username.Normalize(*nextUsername)
+		if !ok {
 			return nil, ErrInvalidUsername
 		}
-		username = &trimmed
+		nextUsername = &normalized
 	}
 	if avatarURL != nil {
 		trimmed := strings.TrimSpace(*avatarURL)
@@ -195,7 +193,7 @@ func (r *postgresRepo) Update(ctx context.Context, userID string, displayName, u
 
 	now := time.Now()
 	var p Profile
-	err := r.pool.QueryRow(ctx, updateProfileSQL, userID, displayName, username, avatarURL, clearAvatar, now).Scan(
+	err := r.pool.QueryRow(ctx, updateProfileSQL, userID, displayName, nextUsername, avatarURL, clearAvatar, now).Scan(
 		&p.UserID, &p.DisplayName, &p.Username, &p.AvatarURL, &p.CreditPoints, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {

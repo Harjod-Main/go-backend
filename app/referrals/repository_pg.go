@@ -4,18 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/RinTanth/go-backend/app/points"
+	"github.com/RinTanth/go-backend/app/username"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// Keep in sync with app/profile username rules.
-var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{3,30}$`)
 
 type postgresRepo struct {
 	pool *pgxpool.Pool
@@ -61,8 +58,8 @@ RETURNING credit_points
 `
 
 func (r *postgresRepo) Accept(ctx context.Context, in AcceptInput) (*AcceptOutcome, error) {
-	username := strings.TrimSpace(in.InviteUsername)
-	if !usernamePattern.MatchString(username) {
+	inviteUsername, ok := username.Normalize(in.InviteUsername)
+	if !ok {
 		return nil, ErrInvalidUsername
 	}
 	if strings.TrimSpace(in.RefereeUserID) == "" {
@@ -80,7 +77,7 @@ func (r *postgresRepo) Accept(ctx context.Context, in AcceptInput) (*AcceptOutco
 	}
 
 	var referrerID, referrerDisplay, referrerUsername string
-	err = tx.QueryRow(ctx, lookupReferrerSQL, username).Scan(&referrerID, &referrerDisplay, &referrerUsername)
+	err = tx.QueryRow(ctx, lookupReferrerSQL, inviteUsername).Scan(&referrerID, &referrerDisplay, &referrerUsername)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrReferrerNotFound
