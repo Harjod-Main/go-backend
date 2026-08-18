@@ -28,13 +28,23 @@ type Place struct {
 	TodayOpenTime     *string  `json:"today_open_time"`
 	TodayCloseTime    *string  `json:"today_close_time"`
 	TodayIsClosed     *bool    `json:"today_is_closed"`
+	EntranceLatitude  *float64 `json:"entrance_latitude,omitempty"`
+	EntranceLongitude *float64 `json:"entrance_longitude,omitempty"`
 }
 
 // MapPlaceCard is hours + gallery for a selected pin (loaded on demand).
 type MapPlaceCard struct {
-	PlaceID   string   `json:"place_id"`
-	PhotoURLs []string `json:"photo_urls"`
-	Hours     []Hour   `json:"hours"`
+	PlaceID    string             `json:"place_id"`
+	PhotoURLs  []string           `json:"photo_urls"`
+	Hours      []Hour             `json:"hours"`
+	Entrances  []MapPlaceEntrance `json:"entrances"`
+}
+
+// MapPlaceEntrance is a drive-in gate used for turn-by-turn directions.
+type MapPlaceEntrance struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Direction string  `json:"direction"`
 }
 
 type Hour struct {

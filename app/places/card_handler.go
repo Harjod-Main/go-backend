@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// GetMapPlaceCard returns weekly hours and gallery photos for a selected pin.
+// GetMapPlaceCard returns weekly hours, gallery photos, and entrances for a selected pin.
 func (h *Handler) GetMapPlaceCard(c *gin.Context) {
 	placeID := strings.TrimSpace(c.Param("placeId"))
 	if _, err := uuid.Parse(placeID); err != nil {

@@ -388,6 +388,7 @@ func TestGetMapPlaceCard_ReturnsHoursAndPhotos(t *testing.T) {
 	r.Equal(string(app.CodeSuccess), body.Code)
 	r.Equal("https://cdn.example/p.jpg", body.Data.PhotoURLs[0])
 	r.Equal("TUE", body.Data.Hours[0].DayOfWeek)
+	r.Empty(body.Data.Entrances)
 }
 
 func TestGetMapPlaceCard_RejectsInvalidID(t *testing.T) {
