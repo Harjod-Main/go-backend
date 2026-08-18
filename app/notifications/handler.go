@@ -190,11 +190,6 @@ func (h *Handler) DeleteWebPushSubscription(c *gin.Context) {
 	})
 }
 
-// DELETE compatibility with older temporary route used by the frontend while backend is being built.
-func (h *Handler) DeleteWebPushSubscriptionCompat(c *gin.Context) {
-	h.DeleteWebPushSubscription(c)
-}
-
 // POST /api/v1/me/ios-push-token
 func (h *Handler) UpsertIOSPushToken(c *gin.Context) {
 	claims, ok := supabaseauth.ClaimsFromGin(c)

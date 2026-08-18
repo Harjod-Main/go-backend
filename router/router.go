@@ -303,10 +303,7 @@ func registerNotificationsRoutes(r *gin.Engine, notificationsHandler *notificati
 		meGroup.PATCH("/notification-preferences", notificationsHandler.UpdatePreferences)
 
 		meGroup.POST("/web-push-subscriptions", notificationsHandler.UpsertWebPushSubscription)
-		// Expected path (preferred)
 		meGroup.DELETE("/web-push-subscriptions", notificationsHandler.DeleteWebPushSubscription)
-		// Compatibility with current frontend MVP placeholder call.
-		meGroup.DELETE("/web-push-subscriptions:delete", notificationsHandler.DeleteWebPushSubscriptionCompat)
 
 		meGroup.POST("/ios-push-token", notificationsHandler.UpsertIOSPushToken)
 		meGroup.DELETE("/ios-push-token", notificationsHandler.DeleteIOSPushToken)
