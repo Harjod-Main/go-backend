@@ -110,7 +110,7 @@ func parseExpoTickets(raw []byte, expect int) ([]expoPushTicket, error) {
 }
 
 func classifyExpoTicket(ticket expoPushTicket) error {
-	if ticket.Status == "" || ticket.Status == "ok" {
+	if ticket.Status == "ok" {
 		return nil
 	}
 	if isStaleExpoError(ticket.Details.Error) {

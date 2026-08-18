@@ -467,6 +467,8 @@ func TestChunkByAndUniqueStrings(t *testing.T) {
 func TestClassifyExpoTicket(t *testing.T) {
 	r := require.New(t)
 	r.NoError(classifyExpoTicket(expoPushTicket{Status: "ok"}))
+	r.Error(classifyExpoTicket(expoPushTicket{}))
+	r.Error(classifyExpoTicket(expoPushTicket{Status: "error"}))
 
 	stale := expoPushTicket{Status: "error", Message: "gone"}
 	stale.Details.Error = "DeviceNotRegistered"
