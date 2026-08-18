@@ -308,7 +308,9 @@ SELECT
 	pa.transit_access,
 	pa.transit_access_type
 FROM parking_area pa
+INNER JOIN places pl ON pl.place_id = pa.place_id
 WHERE pa.place_id = $1::uuid
+	AND COALESCE(pl.is_blacklisted, false) = false
 ORDER BY pa.parking_area_id
 LIMIT 1
 `
