@@ -15,10 +15,6 @@ import (
 
 type webPushSendFunc func(ctx context.Context, message []byte, sub WebPushSubscriptionRequest, opts *webpush.Options) error
 
-func buildWebPushPayload(evt NotificationEvent) (title, body, url string) {
-	return evt.Title, evt.Body, evt.URL
-}
-
 func (s *Sender) sendWebPush(ctx context.Context, userID string, evt NotificationEvent) error {
 	privateKey := os.Getenv("WEB_PUSH_VAPID_PRIVATE_KEY")
 	publicKey := os.Getenv("WEB_PUSH_VAPID_PUBLIC_KEY")
@@ -32,18 +28,11 @@ func (s *Sender) sendWebPush(ctx context.Context, userID string, evt Notificatio
 		return nil
 	}
 
-	titles, body, url := buildWebPushPayload(evt)
-
-	// webpush-go expects message bytes (we send JSON so the SW can parse it)
 	payload := map[string]any{
-		"title": evt.Type + " " + titles,
-		"body":  body,
-		"url":   url,
+		"title": evt.Title,
+		"body":  evt.Body,
+		"url":   evt.URL,
 		"type":  evt.Type,
-	}
-	// If title already set, use it (avoid duplication).
-	if evt.Title != "" {
-		payload["title"] = evt.Title
 	}
 
 	message, err := json.Marshal(payload)
