@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/RinTanth/go-backend/app/auth/supabaseauth"
@@ -49,6 +50,14 @@ func respondNotificationBadRequest(c *gin.Context) {
 
 func withinLen(value string, maxLen int) bool {
 	return len(value) > 0 && len(value) <= maxLen
+}
+
+func webPushEndpointHost(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return "invalid"
+	}
+	return u.Host
 }
 
 // PATCH /api/v1/me/notification-preferences
@@ -124,7 +133,7 @@ func (h *Handler) UpsertWebPushSubscription(c *gin.Context) {
 	}
 
 	if err := h.repo.UpsertWebPushSubscription(c.Request.Context(), claims.Sub, req); err != nil {
-		slog.Error("upsert web push subscription failed", "user_id", claims.Sub, "endpoint", req.Endpoint, "error", err)
+		slog.Error("upsert web push subscription failed", "user_id", claims.Sub, "endpoint_host", webPushEndpointHost(req.Endpoint), "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
 			HTTPStatus: http.StatusInternalServerError,
 			Code:       app.CodeInternalError,
@@ -173,7 +182,7 @@ func (h *Handler) DeleteWebPushSubscription(c *gin.Context) {
 	}
 
 	if err := h.repo.DeleteWebPushSubscription(c.Request.Context(), claims.Sub, endpoint); err != nil {
-		slog.Error("delete web push subscription failed", "user_id", claims.Sub, "endpoint", endpoint, "error", err)
+		slog.Error("delete web push subscription failed", "user_id", claims.Sub, "endpoint_host", webPushEndpointHost(endpoint), "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[genericOK]{
 			HTTPStatus: http.StatusInternalServerError,
 			Code:       app.CodeInternalError,
