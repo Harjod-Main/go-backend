@@ -105,7 +105,13 @@ func (r *postgresRepo) ReviewExists(ctx context.Context, reviewID string) (bool,
 
 func (r *postgresRepo) PlaceExists(ctx context.Context, placeID string) (bool, error) {
 	var exists bool
-	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM places WHERE place_id = $1::uuid)`, placeID).Scan(&exists)
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM places
+			WHERE place_id = $1::uuid
+				AND COALESCE(is_blacklisted, false) = false
+		)
+	`, placeID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check place exists: %w", err)
 	}

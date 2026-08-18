@@ -7,6 +7,7 @@ import (
 )
 
 type Repository interface {
+	// PlaceExists is true for a visible (non-blacklisted) place.
 	PlaceExists(ctx context.Context, placeID string) (bool, error)
 	// Create inserts a check-in and awards points. Concurrent creates for the
 	// same user+place are serialized; returns ErrCooldown when still within Cooldown.
