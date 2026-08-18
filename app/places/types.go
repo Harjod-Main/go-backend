@@ -4,38 +4,38 @@ import "encoding/json"
 
 // Place is the map-list payload: pin/list fields only, no nested hours/rates/images.
 type Place struct {
-	PlaceID           string             `json:"place_id"`
-	NameTh            string             `json:"name_th"`
-	NameEn            string             `json:"name_en"`
-	PlaceType         string             `json:"place_type"`
-	Latitude          float64            `json:"latitude"`
-	Longitude         float64            `json:"longitude"`
-	AddressTh         *string            `json:"address_th"`
-	DistrictTh        *string            `json:"district_th"`
-	ProvinceTh        *string            `json:"province_th"`
-	PostalCode        *string            `json:"postal_code"`
-	PhotoURL          *string            `json:"photo_url,omitempty"`
-	AvgRating         *float64           `json:"avg_rating"`
-	ReviewCount       int                `json:"review_count"`
-	HasEVCharging     *bool              `json:"has_ev_charging"`
-	HasValet          *bool              `json:"has_valet"`
-	HasCover          *bool              `json:"has_cover"`
-	TransitAccess     *bool              `json:"transit_access"`
-	TransitAccessType *string            `json:"transit_access_type"`
-	TotalSpaces       *int               `json:"total_spaces"`
-	FreeMinutes       *int               `json:"free_minutes"`
-	MinHourlyRate     *float64           `json:"min_hourly_rate"`
-	TodayOpenTime     *string            `json:"today_open_time"`
-	TodayCloseTime    *string            `json:"today_close_time"`
-	TodayIsClosed     *bool              `json:"today_is_closed"`
-	Entrances         []MapPlaceEntrance `json:"entrances,omitempty"`
+	PlaceID           string   `json:"place_id"`
+	NameTh            string   `json:"name_th"`
+	NameEn            string   `json:"name_en"`
+	PlaceType         string   `json:"place_type"`
+	Latitude          float64  `json:"latitude"`
+	Longitude         float64  `json:"longitude"`
+	AddressTh         *string  `json:"address_th"`
+	DistrictTh        *string  `json:"district_th"`
+	ProvinceTh        *string  `json:"province_th"`
+	PostalCode        *string  `json:"postal_code"`
+	PhotoURL          *string  `json:"photo_url,omitempty"`
+	AvgRating         *float64 `json:"avg_rating"`
+	ReviewCount       int      `json:"review_count"`
+	HasEVCharging     *bool    `json:"has_ev_charging"`
+	HasValet          *bool    `json:"has_valet"`
+	HasCover          *bool    `json:"has_cover"`
+	TransitAccess     *bool    `json:"transit_access"`
+	TransitAccessType *string  `json:"transit_access_type"`
+	TotalSpaces       *int     `json:"total_spaces"`
+	FreeMinutes       *int     `json:"free_minutes"`
+	MinHourlyRate     *float64 `json:"min_hourly_rate"`
+	TodayOpenTime     *string  `json:"today_open_time"`
+	TodayCloseTime    *string  `json:"today_close_time"`
+	TodayIsClosed     *bool    `json:"today_is_closed"`
 }
 
-// MapPlaceCard is hours + gallery for a selected pin (loaded on demand).
+// MapPlaceCard is hours, gallery, and drive-in gates for a selected pin (loaded on demand).
 type MapPlaceCard struct {
-	PlaceID   string   `json:"place_id"`
-	PhotoURLs []string `json:"photo_urls"`
-	Hours     []Hour   `json:"hours"`
+	PlaceID   string             `json:"place_id"`
+	PhotoURLs []string           `json:"photo_urls"`
+	Hours     []Hour             `json:"hours"`
+	Entrances []MapPlaceEntrance `json:"entrances"`
 }
 
 // MapPlaceEntrance is a drive-in gate used for turn-by-turn directions.

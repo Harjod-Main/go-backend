@@ -367,6 +367,11 @@ func TestGetMapPlaceCard_ReturnsHoursAndPhotos(t *testing.T) {
 			CloseTime: &close,
 			IsClosed:  &closed,
 		}},
+		Entrances: []places.MapPlaceEntrance{{
+			Latitude:  13.7465,
+			Longitude: 100.5391,
+			Direction: "entry",
+		}},
 	}
 	repo := &stubRepo{card: card}
 	engine := gin.New()
@@ -388,6 +393,7 @@ func TestGetMapPlaceCard_ReturnsHoursAndPhotos(t *testing.T) {
 	r.Equal(string(app.CodeSuccess), body.Code)
 	r.Equal("https://cdn.example/p.jpg", body.Data.PhotoURLs[0])
 	r.Equal("TUE", body.Data.Hours[0].DayOfWeek)
+	r.Equal("entry", body.Data.Entrances[0].Direction)
 }
 
 func TestGetMapPlaceCard_RejectsInvalidID(t *testing.T) {
