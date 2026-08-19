@@ -136,7 +136,7 @@ func performCreateIssueReport(
 	return w
 }
 
-func TestCreateIssueReport_SuccessUnauthenticated(t *testing.T) {
+func TestCreateIssueReport_RejectsUnauthenticated(t *testing.T) {
 	r := require.New(t)
 	repo := &stubRepo{}
 
@@ -144,9 +144,8 @@ func TestCreateIssueReport_SuccessUnauthenticated(t *testing.T) {
 	r.NoError(err)
 
 	w := performCreateIssueReport(t, repo, payload, false)
-	r.Equal(http.StatusCreated, w.Code)
-	r.True(repo.createIssueCalled)
-	r.Nil(repo.createdIssue.UserID)
+	r.Equal(http.StatusUnauthorized, w.Code)
+	r.False(repo.createIssueCalled)
 }
 
 func TestCreateIssueReport_SuccessAuthenticatedAttachesUser(t *testing.T) {
@@ -174,7 +173,7 @@ func TestCreateIssueReport_RejectsInvalidCategory(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createIssueCalled)
 }
@@ -188,7 +187,7 @@ func TestCreateIssueReport_RejectsEmptyDescription(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createIssueCalled)
 }
@@ -202,7 +201,7 @@ func TestCreateIssueReport_RejectsDescriptionOverLengthCap(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createIssueCalled)
 }
@@ -216,7 +215,7 @@ func TestCreateIssueReport_AcceptsDescriptionAtLengthCap(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusCreated, w.Code)
 	r.True(repo.createIssueCalled)
 }
@@ -230,7 +229,7 @@ func TestCreateIssueReport_RejectsOversizedBody(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createIssueCalled)
 }
@@ -317,7 +316,7 @@ func TestCreateIssueReport_RepositoryErrorReturns500(t *testing.T) {
 	payload, err := json.Marshal(validIssueReportBody())
 	r.NoError(err)
 
-	w := performCreateIssueReport(t, repo, payload, false)
+	w := performCreateIssueReport(t, repo, payload, true)
 	r.Equal(http.StatusInternalServerError, w.Code)
 	r.True(repo.createIssueCalled)
 }
@@ -502,7 +501,7 @@ func performCreatePlaceFeedback(
 	return w
 }
 
-func TestCreatePlaceFeedback_SuccessUnauthenticated(t *testing.T) {
+func TestCreatePlaceFeedback_RejectsUnauthenticated(t *testing.T) {
 	r := require.New(t)
 	repo := &stubRepo{placeExists: true}
 
@@ -510,9 +509,8 @@ func TestCreatePlaceFeedback_SuccessUnauthenticated(t *testing.T) {
 	r.NoError(err)
 
 	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
-	r.Equal(http.StatusCreated, w.Code)
-	r.True(repo.createFeedbackCalled)
-	r.Nil(repo.createdFeedback.UserID)
+	r.Equal(http.StatusUnauthorized, w.Code)
+	r.False(repo.createFeedbackCalled)
 }
 
 func TestCreatePlaceFeedback_SuccessAuthenticatedAttachesUser(t *testing.T) {
@@ -535,7 +533,7 @@ func TestCreatePlaceFeedback_RejectsInvalidPlaceID(t *testing.T) {
 	payload, err := json.Marshal(validPlaceFeedbackBody())
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, "not-a-uuid", payload, false)
+	w := performCreatePlaceFeedback(t, repo, "not-a-uuid", payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -549,7 +547,7 @@ func TestCreatePlaceFeedback_RejectsInvalidFeedbackType(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -561,7 +559,7 @@ func TestCreatePlaceFeedback_RejectsMissingPlace(t *testing.T) {
 	payload, err := json.Marshal(validPlaceFeedbackBody())
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusNotFound, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -573,7 +571,7 @@ func TestCreatePlaceFeedback_PlaceExistsErrorReturns500(t *testing.T) {
 	payload, err := json.Marshal(validPlaceFeedbackBody())
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusInternalServerError, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -591,7 +589,7 @@ func TestCreatePlaceFeedback_RejectsTooManyPhotoURLs(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -605,7 +603,7 @@ func TestCreatePlaceFeedback_RejectsInvalidSinglePhotoURL(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -619,7 +617,7 @@ func TestCreatePlaceFeedback_BlankSinglePhotoURLTreatedAsAbsent(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusCreated, w.Code)
 	r.True(repo.createFeedbackCalled)
 	r.Nil(repo.createdFeedback.PhotoURL)
@@ -632,7 +630,7 @@ func TestCreatePlaceFeedback_RepositoryErrorReturns500(t *testing.T) {
 	payload, err := json.Marshal(validPlaceFeedbackBody())
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusInternalServerError, w.Code)
 	r.True(repo.createFeedbackCalled)
 }
@@ -646,7 +644,7 @@ func TestCreatePlaceFeedback_RejectsDescriptionOverLengthCap(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createFeedbackCalled)
 }
@@ -660,7 +658,7 @@ func TestCreatePlaceFeedback_RejectsOversizedBody(t *testing.T) {
 	payload, err := json.Marshal(body)
 	r.NoError(err)
 
-	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, false)
+	w := performCreatePlaceFeedback(t, repo, testPlaceID, payload, true)
 	r.Equal(http.StatusBadRequest, w.Code)
 	r.False(repo.createFeedbackCalled)
 }

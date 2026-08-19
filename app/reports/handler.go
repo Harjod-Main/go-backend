@@ -116,8 +116,18 @@ func (h *Handler) ListMine(c *gin.Context) {
 	})
 }
 
-// CreateIssueReport handles POST /api/v1/reports (auth optional).
+// CreateIssueReport handles POST /api/v1/reports (auth required).
 func (h *Handler) CreateIssueReport(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxIssueReportBodyBytes)
 	var body CreateIssueReportRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -157,20 +167,10 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		return
 	}
 
-	claims, authenticated := supabaseauth.ClaimsFromGin(c)
-
 	// Issue report photos live in a private bucket, so the client submits object
-	// paths instead of public URLs. Uploads are user-scoped; require auth and
-	// reject paths outside "{userID}/reports/".
+	// paths instead of public URLs. Uploads are user-scoped; reject paths
+	// outside "{userID}/reports/".
 	if len(body.PhotoURLs) > 0 {
-		if !authenticated {
-			wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
-				HTTPStatus: http.StatusUnauthorized,
-				Code:       app.CodeUnauthorized,
-				Message:    app.MessageUnauthorized,
-			})
-			return
-		}
 		if len(body.PhotoURLs) > 5 || !mediaurl.ValidOwnedPrivateReportPaths(body.PhotoURLs, claims.Sub, mediaurl.MaxURLLen) {
 			wrapper.Respond(c, wrapper.ResponseOption[IssueReport]{
 				HTTPStatus: http.StatusBadRequest,
@@ -181,19 +181,17 @@ func (h *Handler) CreateIssueReport(c *gin.Context) {
 		}
 	}
 
+	uid := claims.Sub
 	report := IssueReport{
 		Category:      category,
 		Description:   description,
 		PhotoURLs:     body.PhotoURLs,
 		ReporterEmail: reporterEmail,
+		UserID:        &uid,
 	}
-	if authenticated {
-		uid := claims.Sub
-		report.UserID = &uid
-		if report.ReporterEmail == nil && claims.Email != "" {
-			email := claims.Email
-			report.ReporterEmail = &email
-		}
+	if report.ReporterEmail == nil && claims.Email != "" {
+		email := claims.Email
+		report.ReporterEmail = &email
 	}
 
 	if err := h.repo.CreateIssueReport(c.Request.Context(), &report); err != nil {
@@ -312,8 +310,18 @@ func (h *Handler) CreateReviewReport(c *gin.Context) {
 	})
 }
 
-// CreatePlaceFeedback handles POST /api/v1/places/:placeId/feedback (auth optional).
+// CreatePlaceFeedback handles POST /api/v1/places/:placeId/feedback (auth required).
 func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
+	claims, ok := supabaseauth.ClaimsFromGin(c)
+	if !ok {
+		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
+			HTTPStatus: http.StatusUnauthorized,
+			Code:       app.CodeUnauthorized,
+			Message:    app.MessageUnauthorized,
+		})
+		return
+	}
+
 	placeID := strings.TrimSpace(c.Param("placeId"))
 	if _, err := uuid.Parse(placeID); err != nil {
 		wrapper.Respond(c, wrapper.ResponseOption[PlaceFeedback]{
@@ -423,6 +431,7 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 		}
 	}
 
+	uid := claims.Sub
 	feedback := PlaceFeedback{
 		PlaceID:        placeID,
 		FeedbackType:   feedbackType,
@@ -432,14 +441,11 @@ func (h *Handler) CreatePlaceFeedback(c *gin.Context) {
 		PhotoURLs:      body.PhotoURLs,
 		OldValue:       oldValue,
 		SuggestedValue: suggestedValue,
+		UserID:         &uid,
 	}
-	if claims, ok := supabaseauth.ClaimsFromGin(c); ok {
-		uid := claims.Sub
-		feedback.UserID = &uid
-		if feedback.ReporterEmail == nil && claims.Email != "" {
-			email := claims.Email
-			feedback.ReporterEmail = &email
-		}
+	if feedback.ReporterEmail == nil && claims.Email != "" {
+		email := claims.Email
+		feedback.ReporterEmail = &email
 	}
 
 	if err := h.repo.CreatePlaceFeedback(c.Request.Context(), &feedback); err != nil {

@@ -234,7 +234,7 @@ func registerReportsRoutes(r *gin.Engine, reportsHandler *reports.Handler, verif
 	r.GET("/api/v1/me/reports", supabaseauth.Middleware(verifier), reportsHandler.ListMine)
 
 	reportsWrites := r.Group("/api/v1/reports")
-	reportsWrites.Use(supabaseauth.OptionalMiddleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	reportsWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
 	{
 		reportsWrites.POST("", reportsHandler.CreateIssueReport)
 	}
@@ -246,7 +246,7 @@ func registerReportsRoutes(r *gin.Engine, reportsHandler *reports.Handler, verif
 	}
 
 	feedbackWrites := r.Group("/api/v1/places/:placeId/feedback")
-	feedbackWrites.Use(supabaseauth.OptionalMiddleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
+	feedbackWrites.Use(supabaseauth.Middleware(verifier), localmw.ActorRateLimit(writeRateLimitPerMinute, time.Minute))
 	{
 		feedbackWrites.POST("", reportsHandler.CreatePlaceFeedback)
 	}
