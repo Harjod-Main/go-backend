@@ -21,6 +21,7 @@ type stubRepo struct {
 	upsertPrefsCalled   bool
 	lastEndpoint        string
 	lastToken           string
+	lastDeleteUserID    string
 	prefs               *notifications.NotificationPreferences
 }
 
@@ -39,7 +40,8 @@ func (s *stubRepo) UpsertWebPushSubscription(_ context.Context, _ string, req no
 	s.lastEndpoint = req.Endpoint
 	return nil
 }
-func (s *stubRepo) DeleteWebPushSubscription(context.Context, string, string) error {
+func (s *stubRepo) DeleteWebPushSubscription(_ context.Context, userID string, _ string) error {
+	s.lastDeleteUserID = userID
 	return nil
 }
 func (s *stubRepo) DeleteWebPushSubscriptions(context.Context, string, []string) error {
@@ -221,4 +223,16 @@ func TestDeleteWebPush_RejectsLongEndpoint(t *testing.T) {
 		nil,
 	)
 	r.Equal(http.StatusBadRequest, w.Code)
+}
+
+func TestDeleteWebPush_UsesClaimsNotBodyUserId(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+	h := notifications.NewHandler(notifications.HandlerConfig{Repo: repo})
+	w := perform(t, http.MethodDelete, "/api/v1/me/web-push-subscriptions", h.DeleteWebPushSubscription, map[string]any{
+		"endpoint": "https://fcm.googleapis.com/fcm/send/abc",
+		"userId":   "99999999-9999-9999-9999-999999999999",
+	})
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.lastDeleteUserID)
 }

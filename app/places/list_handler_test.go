@@ -45,6 +45,7 @@ type stubRepo struct {
 	stampFree          map[string]int
 	placeMissing       bool
 	createPrivilegeErr error
+	lastReactionUserID string
 }
 
 func (s *stubRepo) ListMapPlaces(_ context.Context, bounds *places.MapBounds) ([]places.Place, error) {
@@ -267,16 +268,18 @@ func (s *stubRepo) GetPlaceReaction(context.Context, string, string) (*places.Pl
 }
 
 func (s *stubRepo) SetPlaceReaction(
-	context.Context,
-	string,
-	string,
-	places.PlaceReactionKind,
+	_ context.Context,
+	_ string,
+	userID string,
+	_ places.PlaceReactionKind,
 ) (*places.PlaceReactionResponse, error) {
+	s.lastReactionUserID = userID
 	like := places.PlaceReactionLike
 	return &places.PlaceReactionResponse{MyReaction: &like}, nil
 }
 
-func (s *stubRepo) ClearPlaceReaction(context.Context, string, string) (*places.PlaceReactionResponse, error) {
+func (s *stubRepo) ClearPlaceReaction(_ context.Context, _ string, userID string) (*places.PlaceReactionResponse, error) {
+	s.lastReactionUserID = userID
 	return &places.PlaceReactionResponse{}, nil
 }
 

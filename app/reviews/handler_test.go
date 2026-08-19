@@ -34,9 +34,11 @@ type stubRepo struct {
 	created      *reviews.Review
 	createErr    error
 
-	updateCalled bool
-	updated      *reviews.Review
-	updateErr    error
+	updateCalled     bool
+	updated          *reviews.Review
+	updateErr        error
+	ownerUserID      string
+	lastUpdateUserID string
 
 	listItems      []reviews.Review
 	listNextCursor *string
@@ -80,8 +82,12 @@ func (s *stubRepo) Create(_ context.Context, review *reviews.Review) error {
 
 func (s *stubRepo) Update(_ context.Context, userID string, review *reviews.Review) error {
 	s.updateCalled = true
+	s.lastUpdateUserID = userID
 	if s.updateErr != nil {
 		return s.updateErr
+	}
+	if s.ownerUserID != "" && userID != s.ownerUserID {
+		return reviews.ErrNotFound
 	}
 	review.UserID = userID
 	if review.PlaceID == "" {
@@ -579,4 +585,18 @@ func TestUpdate_NotFound(t *testing.T) {
 	w := performUpdate(t, repo, testReviewID, payload, true)
 	r.Equal(http.StatusNotFound, w.Code)
 	r.True(repo.updateCalled)
+}
+
+func TestUpdate_OtherUserGetsNotFound(t *testing.T) {
+	r := require.New(t)
+	const otherUserID = "99999999-9999-9999-9999-999999999999"
+	repo := &stubRepo{ownerUserID: otherUserID}
+	payload, err := json.Marshal(map[string]any{"rating": 4})
+	r.NoError(err)
+
+	w := performUpdate(t, repo, testReviewID, payload, true)
+	r.Equal(http.StatusNotFound, w.Code)
+	r.True(repo.updateCalled)
+	r.Equal(testUserID, repo.lastUpdateUserID)
+	r.Nil(repo.updated)
 }

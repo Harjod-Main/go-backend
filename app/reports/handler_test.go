@@ -49,6 +49,8 @@ type stubRepo struct {
 
 	placeExists    bool
 	placeExistsErr error
+
+	listUserID string
 }
 
 func (s *stubRepo) CreateIssueReport(_ context.Context, report *reports.IssueReport) error {
@@ -81,7 +83,8 @@ func (s *stubRepo) CreatePlaceFeedback(_ context.Context, feedback *reports.Plac
 	return nil
 }
 
-func (s *stubRepo) ListIssueReportsByUser(_ context.Context, _ string, _ int, _ *pagination.Cursor) ([]reports.IssueReport, *string, error) {
+func (s *stubRepo) ListIssueReportsByUser(_ context.Context, userID string, _ int, _ *pagination.Cursor) ([]reports.IssueReport, *string, error) {
+	s.listUserID = userID
 	return nil, nil, nil
 }
 
@@ -162,6 +165,38 @@ func TestCreateIssueReport_SuccessAuthenticatedAttachesUser(t *testing.T) {
 	r.Equal(testUserID, *repo.createdIssue.UserID)
 	r.NotNil(repo.createdIssue.ReporterEmail)
 	r.Equal("reporter@example.com", *repo.createdIssue.ReporterEmail)
+}
+
+func TestCreateIssueReport_IgnoresSpoofedUserId(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{}
+	body := validIssueReportBody()
+	body["userId"] = "99999999-9999-9999-9999-999999999999"
+	payload, err := json.Marshal(body)
+	r.NoError(err)
+
+	w := performCreateIssueReport(t, repo, payload, true)
+	r.Equal(http.StatusCreated, w.Code)
+	r.Equal(testUserID, *repo.createdIssue.UserID)
+}
+
+func TestListMine_IgnoresUserIdQuery(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+	repo := &stubRepo{}
+	handler := reports.NewHandler(reports.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.GET("/api/v1/me/reports", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{Sub: testUserID})
+		handler.ListMine(c)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/reports?userId=99999999-9999-9999-9999-999999999999", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal(testUserID, repo.listUserID)
 }
 
 func TestCreateIssueReport_RejectsInvalidCategory(t *testing.T) {

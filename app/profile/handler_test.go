@@ -19,14 +19,16 @@ import (
 )
 
 type stubRepo struct {
-	getProfile  *profile.Profile
-	getErr      error
-	updateOut   *profile.Profile
-	updateErr   error
-	events      []profile.CreditEvent
-	getCalls    atomic.Int32
-	ensureCalls atomic.Int32
-	updateCalls atomic.Int32
+	getProfile       *profile.Profile
+	getErr           error
+	updateOut        *profile.Profile
+	updateErr        error
+	lastUpdateUserID string
+	events           []profile.CreditEvent
+	lastCreditUserID string
+	getCalls         atomic.Int32
+	ensureCalls      atomic.Int32
+	updateCalls      atomic.Int32
 }
 
 func (s *stubRepo) GetByUserID(context.Context, string) (*profile.Profile, error) {
@@ -44,8 +46,9 @@ func (s *stubRepo) SyncFromOAuth(context.Context, string, string, profile.OAuthS
 	return s.getProfile, s.getErr
 }
 
-func (s *stubRepo) Update(context.Context, string, *string, *string, *string, bool) (*profile.Profile, error) {
+func (s *stubRepo) Update(_ context.Context, userID string, _ *string, _ *string, _ *string, _ bool) (*profile.Profile, error) {
 	s.updateCalls.Add(1)
+	s.lastUpdateUserID = userID
 	return s.updateOut, s.updateErr
 }
 
@@ -53,7 +56,8 @@ func (s *stubRepo) AddCreditPoints(_ context.Context, _ string, in profile.Credi
 	return in.Amount, nil
 }
 
-func (s *stubRepo) ListCreditEvents(context.Context, string, int, *pagination.Cursor) ([]profile.CreditEvent, *string, error) {
+func (s *stubRepo) ListCreditEvents(_ context.Context, userID string, _ int, _ *pagination.Cursor) ([]profile.CreditEvent, *string, error) {
+	s.lastCreditUserID = userID
 	return s.events, nil, nil
 }
 
@@ -193,4 +197,45 @@ func TestListCreditHistory_ReturnsEvents(t *testing.T) {
 	r.Len(body.Data.Events, 1)
 	r.Equal("review", body.Data.Events[0].Reason)
 	r.Equal(50, body.Data.Events[0].Amount)
+}
+
+func TestUpdateProfile_IgnoresSpoofedUserId(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	const actorID = "11111111-1111-1111-1111-111111111111"
+	out := &profile.Profile{UserID: actorID, DisplayName: "Ada", Username: "ada"}
+	repo := &stubRepo{updateOut: out, getProfile: out}
+	handler := profile.NewHandler(profile.HandlerConfig{Repo: repo})
+
+	engine := gin.New()
+	engine.Use(withClaims())
+	engine.PATCH("/api/v1/profile", handler.Update)
+
+	body := bytes.NewBufferString(`{"displayName":"Ada","userId":"99999999-9999-9999-9999-999999999999"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/profile", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal(actorID, repo.lastUpdateUserID)
+}
+
+func TestListCreditHistory_IgnoresUserIdQuery(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{}
+	handler := profile.NewHandler(profile.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.Use(withClaims())
+	engine.GET("/api/v1/me/credit-points", handler.ListCreditHistory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/credit-points?userId=99999999-9999-9999-9999-999999999999", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.lastCreditUserID)
 }

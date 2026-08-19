@@ -24,6 +24,7 @@ type stubRepo struct {
 	createCalled bool
 	created      *checkins.CheckIn
 	listItems    []checkins.CheckInActivity
+	listUserID   string
 }
 
 func (s *stubRepo) PlaceExists(_ context.Context, _ string) (bool, error) {
@@ -52,7 +53,8 @@ func (s *stubRepo) Create(_ context.Context, in checkins.CreateInput) (*checkins
 	return s.created, nil
 }
 
-func (s *stubRepo) ListByUser(_ context.Context, _ string, _ int, _ *pagination.Cursor) ([]checkins.CheckInActivity, *string, error) {
+func (s *stubRepo) ListByUser(_ context.Context, userID string, _ int, _ *pagination.Cursor) ([]checkins.CheckInActivity, *string, error) {
+	s.listUserID = userID
 	return s.listItems, nil, nil
 }
 
@@ -120,6 +122,19 @@ func TestCreate_Success(t *testing.T) {
 	})
 	r.Equal(http.StatusCreated, w.Code)
 	r.True(repo.createCalled)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.created.UserID)
+}
+
+func TestCreate_IgnoresSpoofedUserId(t *testing.T) {
+	r := require.New(t)
+	repo := &stubRepo{exists: true}
+	w := performCreate(t, repo, map[string]any{
+		"occupancy": "normal",
+		"satisfied": true,
+		"userId":    "99999999-9999-9999-9999-999999999999",
+	})
+	r.Equal(http.StatusCreated, w.Code)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.created.UserID)
 }
 
 func TestCreate_RejectsCooldown(t *testing.T) {
@@ -223,4 +238,26 @@ func TestListMine_Success(t *testing.T) {
 	r.Nil(body.Data.NextCursor)
 	r.Len(body.Data.CheckIns, 1)
 	r.Equal("Test Lot", body.Data.CheckIns[0].PlaceNameEn)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.listUserID)
+}
+
+func TestListMine_IgnoresUserIdQuery(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+	repo := &stubRepo{}
+	handler := checkins.NewHandler(checkins.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.GET("/api/v1/me/check-ins", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.ListMine(c)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/check-ins?userId=99999999-9999-9999-9999-999999999999", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.listUserID)
 }

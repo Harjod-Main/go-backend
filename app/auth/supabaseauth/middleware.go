@@ -2,6 +2,7 @@ package supabaseauth
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -59,11 +60,11 @@ func attachClaims(c *gin.Context, verifier *Verifier, required bool) bool {
 	raw := strings.TrimSpace(strings.TrimPrefix(authHeader, bearerPrefix))
 	claims, err := verifier.Verify(raw)
 	if err != nil {
+		slog.Error("verify access token failed", "error", err)
 		wrapper.Respond(c, wrapper.ResponseOption[any]{
 			HTTPStatus: http.StatusUnauthorized,
 			Code:       app.CodeUnauthorized,
 			Message:    app.MessageUnauthorized,
-			Err:        err,
 		})
 		c.Abort()
 		return false

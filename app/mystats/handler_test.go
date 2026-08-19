@@ -15,11 +15,13 @@ import (
 )
 
 type stubRepo struct {
-	stats *mystats.Stats
-	err   error
+	stats      *mystats.Stats
+	err        error
+	lastUserID string
 }
 
-func (s *stubRepo) CountByUser(_ context.Context, _ string) (*mystats.Stats, error) {
+func (s *stubRepo) CountByUser(_ context.Context, userID string) (*mystats.Stats, error) {
+	s.lastUserID = userID
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -96,4 +98,26 @@ func TestGetMineRepoError(t *testing.T) {
 	engine.ServeHTTP(w, req)
 
 	r.Equal(http.StatusInternalServerError, w.Code)
+}
+
+func TestGetMine_IgnoresUserIdQuery(t *testing.T) {
+	r := require.New(t)
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubRepo{stats: &mystats.Stats{}}
+	handler := mystats.NewHandler(mystats.HandlerConfig{Repo: repo})
+	engine := gin.New()
+	engine.GET("/api/v1/me/stats", func(c *gin.Context) {
+		c.Set(supabaseauth.CtxClaimsKey, &supabaseauth.Claims{
+			Sub: "11111111-1111-1111-1111-111111111111",
+		})
+		handler.GetMine(c)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/stats?userId=99999999-9999-9999-9999-999999999999", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	r.Equal(http.StatusOK, w.Code)
+	r.Equal("11111111-1111-1111-1111-111111111111", repo.lastUserID)
 }
