@@ -1,0 +1,30 @@
+name: harjod-lb
+
+x-api: &api
+  build:
+    context: .
+    args:
+      GIT_COMMIT: ${GIT_COMMIT:-local}
+  image: api:latest
+  restart: unless-stopped
+  env_file:
+    - .env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  expose:
+    - "8080"
+
+services:
+  api-1:
+    <<: *api
+  api-2:
+    <<: *api
+  lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "8082:80"
+    volumes:
+      - ./scripts/k6/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api-1
+      - api-2
